@@ -15,13 +15,13 @@
 
 ## Status
 
-**Module 1 — Foundation & Tenancy.** Step 1 of 9 complete.
+**Module 1 — Foundation & Tenancy.** Steps 1–2 of 9 complete.
 
 | Step | | |
 |---|---|---|
 | 1 | Workspace skeleton compiles | ✅ |
-| 2 | Database with RLS ⚠ | next |
-| 3 | Identity (Zitadel) | |
+| 2 | Database with RLS ⚠ | ✅ |
+| 3 | Identity (Zitadel) | next |
 | 4 | Authorization (OpenFGA) | |
 | 5 | API surface | |
 | 6 | Web shell | |

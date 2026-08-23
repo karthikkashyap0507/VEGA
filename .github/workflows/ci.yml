@@ -66,27 +66,25 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
-  # ---------------------------------------------------------------------------
-  # Not yet implemented. Each line names the step or module that turns it on.
-  # ---------------------------------------------------------------------------
-
   tenant-isolation:
-    name: 'Tenant isolation — BLOCKING (enable in M1 Step 2)'
+    name: Tenant isolation (BLOCKING)
     runs-on: ubuntu-latest
-    if: false
     services:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: vega_test
+          POSTGRES_DB: vega
           POSTGRES_USER: vega
-          POSTGRES_PASSWORD: vega_test
+          POSTGRES_PASSWORD: vega_local_dev_only
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U vega" --health-interval 5s
           --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://vega:vega_test@localhost:5432/vega_test
+      DATABASE_URL: postgresql://vega:vega_local_dev_only@localhost:5432/vega
+      # The suite MUST run as the least-privilege role. PostgreSQL bypasses RLS for
+      # superusers even with FORCE, so running it as the owner would pass and prove nothing.
+      DATABASE_APP_URL: postgresql://vega_app:vega_app_local_dev_only@localhost:5432/vega
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -95,9 +93,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Create the least-privilege application role
+        # Same file docker-compose mounts as an initdb script locally, so CI and local
+        # development cannot drift on what the app role is allowed to do.
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/docker/initdb/primary/01-roles.sql
       - run: pnpm db:migrate
       - name: Adversarial cross-tenant suite
         run: pnpm --filter @vega/db test:isolation
+
+  # ---------------------------------------------------------------------------
+  # Not yet implemented. Each line names the step or module that turns it on.
+  # ---------------------------------------------------------------------------
 
   e2e:
     name: 'E2E — sign in, invite, workspace, agent (enable in M1 Step 6)'
@@ -118,7 +124,7 @@ jobs:
     runs-on: ubuntu-latest
     if: false
     steps:
-      - run: echo "Property-based: no tool call exceeds its declared taint ceiling."
+      - run: 'echo "Property-based: no tool call exceeds its declared taint ceiling."'
 
   redteam-injection:
     name: 'Red-team injection — BLOCKING (enable in M3)'

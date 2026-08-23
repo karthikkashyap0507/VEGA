@@ -22,7 +22,8 @@
     "stack:reset": "docker compose -f infra/docker/docker-compose.yml down -v",
     "verify:invariants": "node scripts/verify-invariants.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "db:reset": "docker compose -f infra/docker/docker-compose.yml down -v && docker compose -f infra/docker/docker-compose.yml up -d postgres"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

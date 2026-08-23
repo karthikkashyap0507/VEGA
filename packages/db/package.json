@@ -8,6 +8,19 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "migrate": "tsx src/migrate.ts",
+    "seed": "tsx -e \"import('./src/seed.js').then(m=>m.seed()).then(r=>console.log(r))\"",
+    "test:isolation": "vitest run test/isolation.test.ts test/coverage.test.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.10",
+    "vitest": "^4.1.11",
+    "tsx": "^4.19.0"
   }
 }

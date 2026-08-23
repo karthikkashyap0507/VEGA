@@ -64,38 +64,64 @@ day one — additive changes only.
 
 ---
 
-## Step 2 — Database with RLS (4–5 days) ⚠ invariant step
+## Step 2 — Database with RLS ✅ COMPLETE ⚠ invariant step
 
 The single most important step in the module. Everything downstream assumes it.
 
-- [ ] `packages/db` — Drizzle client, schema, migrations
-- [ ] Schema for `tenants`, `users`, `workspaces`, `workspace_members`, `agents`,
+- [x] `packages/db` — Drizzle client, hand-written SQL migrations, migration runner
+- [x] Schema for `tenants`, `users`, `workspaces`, `workspace_members`, `agents`,
       `plan_entitlements`, `secret_refs`, `platform_events` (module1.md §4)
-- [ ] **RLS enabled AND forced** on every tenant-scoped table:
+- [x] **RLS enabled AND forced** on every tenant-scoped table:
       ```sql
       ALTER TABLE <t> ENABLE ROW LEVEL SECURITY;
       ALTER TABLE <t> FORCE  ROW LEVEL SECURITY;
       CREATE POLICY tenant_isolation ON <t>
         USING (tenant_id = current_setting('vega.tenant_id')::uuid);
       ```
-- [ ] `withTenant(tenantId, fn)` helper — opens a transaction, `SET LOCAL vega.tenant_id`, runs
-      `fn`. **This is the only sanctioned way to get a connection.**
-- [ ] Envelope encryption helpers in `packages/shared/crypto` (used by M2 — build it now so M2
-      isn't writing crypto under deadline)
-- [ ] Seed script: 2 tenants with identical-shaped data, for the isolation suite
+- [x] `withTenant(tenantId, fn)` helper — transaction + parameterised `set_config`
+- [x] Envelope encryption in `packages/shared/src/crypto.ts` (AES-256-GCM, DEK wrapped by KEK)
+- [x] Seed script: 2 tenants with identically-shaped data
 
-**DoD — the adversarial suite passes:**
-
-For **every** tenant-scoped table, as tenant A: attempt SELECT / UPDATE / DELETE of tenant B rows
-by id → zero rows returned, zero rows affected. Plus: `SET LOCAL` cannot be overridden by a
-request-supplied value, and a table added without an isolation test fails a schema-coverage check.
+**DoD met — 45 database tests pass, and the suite is proven to fail when RLS is weakened.**
 
 ```bash
 pnpm --filter @vega/db test:isolation
 ```
 
+### What the suite actually asserts
+
+For **every** tenant-scoped table, as tenant A holding tenant B's exact primary keys:
+SELECT → 0 rows · UPDATE → 0 rows affected · DELETE → 0 rows affected · unqualified SELECT
+returns only tenant A. Plus write-side isolation (INSERT and re-parent into another tenant are
+both rejected), fail-closed behaviour with no context, transaction-local context that does not
+leak across pooled connections, and a coverage test that fails when **any** table exists without
+RLS enabled, forced, and carrying both USING and WITH CHECK.
+
+### Mutation-tested
+
+A suite that cannot fail is worthless, so both weakenings were verified to be caught:
+
+| Mutation | Result |
+|---|---|
+| `ALTER TABLE users NO FORCE ROW LEVEL SECURITY` | ❌ caught — *"users: RLS not FORCED (the owner would bypass it)"* |
+| `DROP POLICY tenant_isolation ON agents` | ❌ caught by the coverage test |
+
+Also verified from a **destroyed volume**: migrations alone rebuild a correctly isolated schema.
+
+### Decisions taken during Step 2
+
+| Decision | Why |
+|---|---|
+| **Hand-written SQL migrations, not drizzle-kit generate** | RLS policies, roles, and grants are the substance of this step and are not expressible in a schema DSL. A security reviewer reads SQL. Drizzle remains the typed query layer; `coverage.test.ts` guards drift in the direction that matters. |
+| **`set_config($1, $2, true)` rather than `SET LOCAL`** | `SET LOCAL` cannot take a bind parameter — it would mean interpolating a tenant id into SQL text. `set_config` is parameterised, so a hostile id is a value that fails to cast, never syntax. |
+| **`tenant_id` denormalised onto `workspace_members`** | module1.md §4 models it as `(workspace_id, user_id)` only. An RLS policy that reaches through a join is slower and easier to get wrong; a composite FK keeps the denormalised column honest. |
+| **A malformed context raises rather than returning zero rows** | It can only happen if something bypassed `withTenant`, and that is a bug worth surfacing. Still fail-closed: the statement aborts and returns nothing. |
+| **`assertNotSuperuser()` at startup** | PostgreSQL bypasses RLS for superusers *even with FORCE*. An app running as `postgres` has perfect-looking policies and zero isolation, and tests connecting the same way all pass. |
+| **`plan_entitlements` has RLS with a read-all policy** | Global reference data, but giving it a policy means the coverage test needs no special case, and the app holds no write grant on it. |
+
 **Watch for:** the temptation to bypass `withTenant` "just for this admin query." That is how
-isolation breaks. The `DB-001` invariant check exists to catch it.
+isolation breaks. `DB-001` in `scripts/verify-invariants.mjs` exists to catch it, and
+`withSystemBypassingRls` is named to be uncomfortable to type.
 
 ---
 

@@ -1,0 +1,164 @@
+import pg from 'pg';
+
+/**
+ * Seed for local development and the isolation suite.
+ *
+ * Creates TWO tenants with identically-shaped data. Identical shape is the point: it means
+ * the isolation tests cannot accidentally pass because tenant B simply had nothing to find.
+ *
+ * Runs on the owner connection because a tenant does not exist yet, so there is no tenant
+ * context to set — one of the few legitimate uses of the bypass path.
+ */
+
+export interface SeedResult {
+  tenantA: string;
+  tenantB: string;
+  userA: string;
+  userB: string;
+  workspaceA: string;
+  workspaceB: string;
+  agentA: string;
+  agentB: string;
+}
+
+const ENTITLEMENTS: Array<[string, object, object]> = [
+  [
+    'free',
+    { runsPerMonth: 50, connectors: 1, seats: 1, budgetCents: 0 },
+    {
+      policyAuthoring: false, evidencePacks: false, deterministicReplay: false,
+      approvalRouting: false, dualApproval: false, sharedWorkspaces: false,
+      knowledgeBase: false, certificationLadder: false, sso: false, customerHeldKey: false,
+    },
+  ],
+  [
+    'pro',
+    { runsPerMonth: 1000, connectors: 5, seats: 1, budgetCents: 5000 },
+    {
+      policyAuthoring: false, evidencePacks: false, deterministicReplay: false,
+      approvalRouting: false, dualApproval: false, sharedWorkspaces: false,
+      knowledgeBase: true, certificationLadder: false, sso: false, customerHeldKey: false,
+    },
+  ],
+  [
+    'business',
+    { runsPerMonth: 10000, connectors: 20, seats: 50, budgetCents: 50000 },
+    {
+      policyAuthoring: false, evidencePacks: false, deterministicReplay: false,
+      approvalRouting: false, dualApproval: false, sharedWorkspaces: true,
+      knowledgeBase: true, certificationLadder: false, sso: false, customerHeldKey: false,
+    },
+  ],
+  [
+    'teams',
+    { runsPerMonth: 100000, connectors: 50, seats: 250, budgetCents: 250000 },
+    {
+      policyAuthoring: true, evidencePacks: false, deterministicReplay: false,
+      approvalRouting: true, dualApproval: true, sharedWorkspaces: true,
+      knowledgeBase: true, certificationLadder: true, sso: false, customerHeldKey: false,
+    },
+  ],
+  [
+    'enterprise',
+    { runsPerMonth: 1000000, connectors: 500, seats: 10000, budgetCents: 1000000 },
+    {
+      policyAuthoring: true, evidencePacks: true, deterministicReplay: true,
+      approvalRouting: true, dualApproval: true, sharedWorkspaces: true,
+      knowledgeBase: true, certificationLadder: true, sso: true, customerHeldKey: true,
+    },
+  ],
+];
+
+export async function seed(connectionString?: string): Promise<SeedResult> {
+  const url = connectionString ?? process.env['DATABASE_URL'];
+  if (!url) throw new Error('DATABASE_URL is not set');
+
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    for (const [plan, limits, exposed] of ENTITLEMENTS) {
+      await client.query(
+        `INSERT INTO plan_entitlements (plan, limits, exposed) VALUES ($1, $2, $3)
+         ON CONFLICT (plan) DO UPDATE SET limits = $2, exposed = $3, updated_at = now()`,
+        [plan, JSON.stringify(limits), JSON.stringify(exposed)],
+      );
+    }
+
+    const made: Record<string, string> = {};
+
+    for (const [key, name, slug] of [
+      ['A', 'Acme Advisors', 'acme-advisors'],
+      ['B', 'Borealis Partners', 'borealis-partners'],
+    ] as const) {
+      const t = await client.query<{ id: string }>(
+        `INSERT INTO tenants (name, slug, plan, retention_days)
+         VALUES ($1, $2, 'business', 400)
+         ON CONFLICT (slug) DO UPDATE SET name = $1
+         RETURNING id`,
+        [name, slug],
+      );
+      const tenantId = t.rows[0]!.id;
+
+      const u = await client.query<{ id: string }>(
+        `INSERT INTO users (tenant_id, email, display_name, role, status)
+         VALUES ($1, $2, $3, 'OWNER', 'active')
+         ON CONFLICT (tenant_id, email) DO UPDATE SET display_name = $3
+         RETURNING id`,
+        [tenantId, `owner@${slug}.example`, `Owner ${key}`],
+      );
+      const userId = u.rows[0]!.id;
+
+      const ws = await client.query<{ id: string }>(
+        `INSERT INTO workspaces (tenant_id, name, slug)
+         VALUES ($1, 'Client Operations', 'client-ops')
+         ON CONFLICT (tenant_id, slug) DO UPDATE SET name = 'Client Operations'
+         RETURNING id`,
+        [tenantId],
+      );
+      const workspaceId = ws.rows[0]!.id;
+
+      await client.query(
+        `INSERT INTO workspace_members (tenant_id, workspace_id, user_id, role)
+         VALUES ($1, $2, $3, 'owner')
+         ON CONFLICT (workspace_id, user_id) DO NOTHING`,
+        [tenantId, workspaceId, userId],
+      );
+
+      const ag = await client.query<{ id: string }>(
+        `INSERT INTO agents (tenant_id, workspace_id, name, owner_user_id, idp_machine_id)
+         VALUES ($1, $2, 'client-comm', $3, $4)
+         ON CONFLICT (workspace_id, name, version) DO UPDATE SET owner_user_id = $3
+         RETURNING id`,
+        [tenantId, workspaceId, userId, `machine_${slug}`],
+      );
+
+      await client.query(
+        `INSERT INTO platform_events (tenant_id, actor_id, kind, payload)
+         VALUES ($1, $2, 'tenant.seeded', '{}'::jsonb)`,
+        [tenantId, userId],
+      );
+
+      await client.query(
+        `INSERT INTO secret_refs (tenant_id, purpose, kms_key_id, wrapped_dek, ciphertext, iv, auth_tag)
+         VALUES ($1, 'connector_oauth', 'local', '\\x00', '\\x00', '\\x00', '\\x00')`,
+        [tenantId],
+      );
+
+      made['tenant' + key] = tenantId;
+      made['user' + key] = userId;
+      made['workspace' + key] = workspaceId;
+      made['agent' + key] = ag.rows[0]!.id;
+    }
+
+    await client.query('COMMIT');
+    return made as unknown as SeedResult;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
