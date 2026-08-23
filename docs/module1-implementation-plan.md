@@ -1,0 +1,278 @@
+# Module 1 — Implementation Plan
+
+> Executable plan for [module1.md](module1.md). Nine steps, dependency-ordered. Each step has a
+> definition of done you can actually check.
+
+**Estimate:** 5–7 engineer-weeks solo · 3–4 weeks with two engineers
+**Prerequisite:** none. This is the first code in the project.
+
+---
+
+## How to use this
+
+Steps are ordered so that **each one is verifiable before the next begins**. Do not parallelise
+past a step whose DoD is unmet — steps 2, 3, and 8 all enforce invariants that later steps assume.
+
+Track progress in the checkboxes. When a step's DoD is met, commit it.
+
+---
+
+## Step 0 — Before you write code (½ day)
+
+- [ ] `cp .env.example .env`
+- [ ] Generate the two local secrets:
+      ```bash
+      openssl rand -base64 48   # -> SESSION_SECRET
+      openssl rand -base64 32   # -> LOCAL_KEK_BASE64
+      ```
+- [ ] `pnpm install`
+- [ ] `pnpm stack:up` — first run pulls images, allow ~5 minutes
+- [ ] Confirm: Postgres `:5432`, evidence Postgres `:5433`, Valkey `:6379`,
+      Zitadel `:8080`, OpenFGA `:8081`, Jaeger UI `:16686`
+
+**DoD:** every container healthy (`docker compose ps`), Zitadel console loads at
+`http://localhost:8080` (admin / `Password1!`).
+
+> **No external accounts are needed for Module 1.** Everything above is self-hosted. The first
+> account you need is Google Cloud, in Module 2 — but see §"Start these now" below, because OAuth
+> verification is calendar time, not engineering time.
+
+---
+
+## Step 1 — Workspace skeleton compiles (2–3 days)
+
+The scaffold exists; make it build.
+
+- [ ] `packages/shared` — `brand.ts`, `errors.ts`, `ids.ts`, plus `logging.ts` (pino, redaction
+      of anything token-shaped)
+- [ ] `packages/contracts` — Zod schemas for `Tenant`, `User`, `Workspace`, `Agent`, `Role`,
+      `Plan`, and the Problem Details envelope
+- [ ] `packages/telemetry` — OTel init, `traceparent` propagation, and the log-field convention:
+      **every log line carries `tenant_id` and `trace_id`**
+- [ ] Wire `turbo.json` task graph; `pnpm typecheck` green across the workspace
+
+**DoD:** `pnpm install && pnpm typecheck && pnpm lint` passes from a cold clone.
+
+**Watch for:** `packages/contracts` is imported by every plane. Treat it as a published API from
+day one — additive changes only.
+
+---
+
+## Step 2 — Database with RLS (4–5 days) ⚠ invariant step
+
+The single most important step in the module. Everything downstream assumes it.
+
+- [ ] `packages/db` — Drizzle client, schema, migrations
+- [ ] Schema for `tenants`, `users`, `workspaces`, `workspace_members`, `agents`,
+      `plan_entitlements`, `secret_refs`, `platform_events` (module1.md §4)
+- [ ] **RLS enabled AND forced** on every tenant-scoped table:
+      ```sql
+      ALTER TABLE <t> ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE <t> FORCE  ROW LEVEL SECURITY;
+      CREATE POLICY tenant_isolation ON <t>
+        USING (tenant_id = current_setting('vega.tenant_id')::uuid);
+      ```
+- [ ] `withTenant(tenantId, fn)` helper — opens a transaction, `SET LOCAL vega.tenant_id`, runs
+      `fn`. **This is the only sanctioned way to get a connection.**
+- [ ] Envelope encryption helpers in `packages/shared/crypto` (used by M2 — build it now so M2
+      isn't writing crypto under deadline)
+- [ ] Seed script: 2 tenants with identical-shaped data, for the isolation suite
+
+**DoD — the adversarial suite passes:**
+
+For **every** tenant-scoped table, as tenant A: attempt SELECT / UPDATE / DELETE of tenant B rows
+by id → zero rows returned, zero rows affected. Plus: `SET LOCAL` cannot be overridden by a
+request-supplied value, and a table added without an isolation test fails a schema-coverage check.
+
+```bash
+pnpm --filter @vega/db test:isolation
+```
+
+**Watch for:** the temptation to bypass `withTenant` "just for this admin query." That is how
+isolation breaks. The `DB-001` invariant check exists to catch it.
+
+---
+
+## Step 3 — Identity: Zitadel (4–5 days)
+
+- [ ] In the Zitadel console: create a Project, then an Application (Web, PKCE),
+      redirect `http://localhost:3001/v1/oauth/callback` → paste `ZITADEL_CLIENT_ID` /
+      `ZITADEL_CLIENT_SECRET` into `.env`
+- [ ] Create a Service Account with Org Owner rights, download the key JSON to
+      `infra/docker/secrets/zitadel-sa.json` (gitignored)
+- [ ] OIDC code + PKCE flow in `services/gateway`; session cookie httpOnly + Secure + SameSite=Lax,
+      short TTL with refresh rotation
+- [ ] **Tenant resolution:** `users.idp_subject` → user → tenant. `vega.tenant_id` originates
+      **only** from verified token claims — never a header, query, or body
+- [ ] **Agent identities:** creating an agent provisions a Zitadel *machine user*. Per-run tokens,
+      ≤15 min, scoped. No long-lived agent credential exists anywhere
+
+**DoD:** sign in end-to-end; `GET /v1/me` returns identity + roles + tenant; creating an agent
+produces a distinct machine identity visible in the Zitadel console.
+
+**Watch for:** Zitadel's org-per-tenant model is the reason it was chosen over Keycloak
+(TECHSTACK §12). If it fights you here, that is the signal to spike Keycloak — week 1, not month 3.
+
+---
+
+## Step 4 — Authorization: OpenFGA (3–4 days)
+
+- [ ] Author the model from module1.md §5.4 (`user`, `agent`, `workspace`, `tenant`, `document`)
+- [ ] Create store + write model; record `OPENFGA_STORE_ID` / `OPENFGA_MODEL_ID` in `.env`
+- [ ] `packages/authz` — client, `can(user, relation, object)`, tuple writers, batch check
+- [ ] Tuple lifecycle: writing tuples on workspace/agent create, removing on delete
+- [ ] Role model from module1.md §5.3 — including `AUDITOR` as read-only across the audit plane
+
+**DoD:** OpenFGA assertion tests pass for every role × relation; a member of workspace A cannot
+`can_run_agent` in workspace B.
+
+**Watch for:** the `document` type is unused until M9, but define it now — retrofitting a type into
+a live authorization model means re-writing tuples.
+
+---
+
+## Step 5 — API surface (4–5 days)
+
+- [ ] `services/gateway` (Fastify): public `/v1`, authn, tenant resolution, rate limiting
+- [ ] `services/control` (tRPC): tenants, users, workspaces, agents
+- [ ] `services/execution` + `services/evidence`: health endpoints and plane wiring only
+- [ ] Endpoints from module1.md §7.1
+- [ ] Conventions applied everywhere: `Idempotency-Key` on mutations (24h store), RFC 9457 problem
+      details, cursor pagination, `/v1` path versioning, per-tenant rate limits, `traceparent`
+- [ ] Entitlement middleware reading `plan_entitlements` — **gates exposure only, never logic**
+
+**DoD:** OpenAPI generated from schemas; a request without a resolved tenant context returns
+`tenant-context-missing` (a 500 invariant violation, not a 400); double-POST with the same
+idempotency key produces one effect.
+
+---
+
+## Step 6 — Web shell (5–6 days)
+
+- [ ] Next.js App Router with the six route groups; five render **styled empty states naming the
+      module that fills them** — not `TODO` pages, a design partner sees this
+- [ ] Tailwind + shadcn/ui; semantic tokens only, no raw hex in components
+- [ ] Light + dark themes
+- [ ] **Risk-tier tokens defined once here** (`--risk-low/medium/high/critical`) and used
+      everywhere after. Never color alone — always paired with a label and icon, because these
+      screens end up printed in compliance evidence
+- [ ] **Admin console fully working:** tenant settings (retention floor 180 days enforced in UI
+      *and* API), users (invite / role / deactivate), workspaces, agents (list/create/ownership),
+      sessions
+
+**DoD:** sign in → land in tenant → all six surfaces reachable → complete an invite-to-agent-create
+flow without touching the database.
+
+---
+
+## Step 7 — Self-serve signup (2–3 days)
+
+Built now even though the SMB motion launches later — because it reworks tenant provisioning,
+which every module depends on (decision D-09).
+
+- [ ] Email signup → tenant + workspace provisioned automatically → connector authorize stub →
+      first run stub
+- [ ] `plan_entitlements` seeded for `free` / `pro` / `business` / `teams` / `enterprise`
+- [ ] Plan changes are data, not deploys
+
+**DoD:** a brand-new email reaches a provisioned, usable workspace in **under 5 minutes** with no
+human involvement.
+
+---
+
+## Step 8 — Plane separation (3–4 days) ⚠ invariant step
+
+Application code cannot enforce this. Infrastructure must.
+
+- [ ] Helm chart: four namespaces — `vega-experience`, `vega-control`, `vega-execution`,
+      `vega-evidence`
+- [ ] Cilium **default-deny** in every namespace; explicit allows only (module1.md §3.1)
+- [ ] Separate DB credentials; execution plane holds **no** credential for the evidence DB
+- [ ] mTLS between namespaces (cert-manager)
+- [ ] OpenTofu for Zitadel + OpenFGA provisioning; model checked in
+- [ ] Argo CD application
+
+**DoD — the policy test passes against a deployed cluster:**
+
+- execution service account has no evidence-DB credential
+- a pod in `vega-execution` cannot open TCP to the evidence DB
+- `vega-evidence` cannot initiate a connection to `vega-execution`
+- execution cannot use the evidence signing key in KMS
+
+**A failure here is P0.** This is the control; the code is not.
+
+---
+
+## Step 9 — CI gates + invariant enforcement (2–3 days)
+
+- [ ] `packages/eslint-rules` with all six rules from module1.md §5.6 (two are stubs that M2/M3
+      turn on — ship the stubs so later modules *enable* rather than *introduce* them)
+- [ ] Fixture tests per rule: a violating fixture must fail the build
+- [ ] `scripts/verify-invariants.mjs` wired into CI (already scaffolded)
+- [ ] Full pipeline: lint → typecheck → invariants → unit → integration → **tenant-isolation** →
+      e2e → security scan
+- [ ] Playwright: sign in, invite, workspace, agent create
+- [ ] Later-module gates present but disabled — visibly missing, not silently absent
+
+**DoD:** a PR violating any invariant fails CI with a message naming the invariant and its
+PROJECT.md reference.
+
+---
+
+## Module 1 exit criteria
+
+Copied from module1.md §13. All must hold:
+
+- [ ] Cold clone → `pnpm install && pnpm dev` → full stack in under 5 minutes
+- [ ] Sign in via Zitadel, land in tenant, see all six surfaces
+- [ ] Admin can invite a user, assign a role, create a workspace, create an agent
+- [ ] Creating an agent provisions a distinct machine identity
+- [ ] Tenant isolation suite passes for 100% of tenant-scoped tables, API included
+- [ ] Plane separation policy test passes against a deployed cluster
+- [ ] All six lint rules exist; violating fixtures fail the build
+- [ ] Traces flow end to end in Jaeger with tenant correlation
+- [ ] `brand.ts` is the only file containing the product name (CI-verified)
+- [ ] Helm chart deploys four namespaces with default-deny
+- [ ] Self-serve signup reaches a first run in under 5 minutes
+- [ ] Entitlements are data-driven; adding a plan requires no code change
+- [ ] No business-logic branch keys off `tenants.plan`
+
+---
+
+## Sequencing notes
+
+**Do steps 2 and 8 properly or not at all.** RLS and plane separation are the two things in this
+module that cannot be retrofitted. Everything else can be improved later; these two get harder
+every week they are deferred.
+
+**Step 7 looks premature and is not.** Self-serve provisioning touches the tenant lifecycle, which
+every module depends on. Adding it in month nine means reworking the foundation under nine modules
+of code.
+
+**Leave the loud warnings in.** Later modules replace permissive defaults; until then the logs
+should say the system is ungoverned on every step. Silence here is how an ungoverned deployment
+reaches a customer.
+
+---
+
+## Start these now — they are calendar time, not engineering time
+
+Begin in week 1 of Module 1, even though they belong to later modules:
+
+| Item | Why now | Lead time |
+|---|---|---|
+| **Google Cloud OAuth app verification** | Gmail restricted scopes need verification; blocks the M2 pilot | Weeks |
+| **Microsoft Entra app registration** | Same shape | Days–weeks |
+| **Trademark knockout search** | Blocks any public artifact, and `brand.ts` exists to make the rename cheap | Weeks |
+| **Design partner conversation** | Phase 1 is gated on one signed design partner (PROJECT.md §19) | Weeks–months |
+| **Anthropic API key** | Needed at M3; free to obtain now | Minutes |
+
+---
+
+## What Module 1 deliberately does not do
+
+No agent execution, no connectors, no policy evaluation, no LLM call anywhere. If you find
+yourself reaching for an Anthropic key in this module, you have left scope.
+
+The output of Module 1 is **a running, deployable, empty product** — with a tenancy boundary, a
+plane separation, and build-time invariant enforcement that are real from this point on.

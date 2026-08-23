@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+.next/
+out/
+*.tsbuildinfo
+.turbo/
+
+# environment - NEVER commit real secrets
+.env
+.env.*
+!.env.example
+
+# local data
+*.log
+coverage/
+.vitest/
+tmp/
+.DS_Store
+Thumbs.db
+
+# local stack volumes
+infra/docker/volumes/
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea/

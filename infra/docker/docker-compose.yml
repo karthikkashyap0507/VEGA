@@ -1,0 +1,168 @@
+# =============================================================================
+# VEGA — local development stack (Module 1)
+#
+#   pnpm stack:up      start
+#   pnpm stack:logs    follow
+#   pnpm stack:down    stop
+#   pnpm stack:reset   stop AND DELETE VOLUMES
+#
+# Target: cold clone to running stack in under 5 minutes (docs/module1.md §13).
+#
+# NOTE: `postgres-evidence` is a SEPARATE INSTANCE on purpose. Invariant 1
+# (docs/PROJECT.md §10.2) says the execution plane may append to the evidence
+# plane and nothing else. Sharing one instance here would make it trivially easy
+# to violate that in code later. Keep them separate even locally.
+# =============================================================================
+
+name: vega
+
+services:
+  # ---------------------------------------------------------------- primary DB
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vega
+      POSTGRES_USER: vega
+      POSTGRES_PASSWORD: vega_local_dev_only
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./initdb/primary:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U vega -d vega']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------- evidence DB
+  postgres-evidence:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vega_evidence
+      POSTGRES_USER: vega_evi
+      POSTGRES_PASSWORD: vega_evi_local_dev_only
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres-evidence-data:/var/lib/postgresql/data
+      - ./initdb/evidence:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U vega_evi -d vega_evidence']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ------------------------------------------------------------------- Valkey
+  # Valkey, not Redis (docs/TECHSTACK.md §7.1 — BSD-3, Linux Foundation)
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ['valkey-server', '--save', '60', '1', '--appendonly', 'no']
+    ports:
+      - '6379:6379'
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ------------------------------------------------------------------ Zitadel
+  # Identity: organizations per tenant, machine users for agent identities.
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:latest
+    restart: unless-stopped
+    command: >
+      start-from-init
+      --masterkeyFromEnv
+      --tlsMode disabled
+    environment:
+      ZITADEL_MASTERKEY: MasterkeyNeedsToHave32Characters
+      ZITADEL_EXTERNALSECURE: 'false'
+      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_EXTERNALPORT: 8080
+      ZITADEL_DATABASE_POSTGRES_HOST: postgres-zitadel
+      ZITADEL_DATABASE_POSTGRES_PORT: 5432
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: zitadel_local
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: zitadel_local
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Password1!
+    depends_on:
+      postgres-zitadel:
+        condition: service_healthy
+    ports:
+      - '8080:8080'
+
+  postgres-zitadel:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zitadel
+      POSTGRES_USER: zitadel
+      POSTGRES_PASSWORD: zitadel_local
+    volumes:
+      - postgres-zitadel-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U zitadel -d zitadel']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ------------------------------------------------------------------ OpenFGA
+  # Relationship-based authorization. Needed from M1 for roles; load-bearing at
+  # M9 for ACL-aware retrieval, which is a relationship-graph problem.
+  openfga-migrate:
+    image: openfga/openfga:latest
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://vega:vega_local_dev_only@postgres:5432/vega?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  openfga:
+    image: openfga/openfga:latest
+    restart: unless-stopped
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://vega:vega_local_dev_only@postgres:5432/vega?sslmode=disable
+      OPENFGA_LOG_FORMAT: json
+      OPENFGA_PLAYGROUND_ENABLED: 'true'
+    depends_on:
+      openfga-migrate:
+        condition: service_completed_successfully
+    ports:
+      - '8081:8080' # HTTP API
+      - '8082:3000' # playground
+      - '8083:8081' # gRPC
+
+  # -------------------------------------------------------- OTel + SigNoz(lite)
+  # Full SigNoz is heavy for a laptop. Jaeger gives trace correlation in dev;
+  # SigNoz/ClickHouse arrives with the deployed environment.
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+    ports:
+      - '16686:16686' # UI
+      - '4317:4317' # OTLP gRPC
+      - '4318:4318' # OTLP HTTP
+
+volumes:
+  postgres-data:
+  postgres-evidence-data:
+  postgres-zitadel-data:
+  valkey-data:
