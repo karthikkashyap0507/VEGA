@@ -16,6 +16,12 @@ const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', '.next', '.turbo', 'coverage', 'docs', 'evals',
 ]);
 
+// Never scan local-only files. `.env` holds real credentials by design.
+const SKIP_FILES = /^\.env(\..*)?$/;
+
+/** Source files. Code-shaped invariants apply only to these. */
+const SOURCE = /\.(ts|tsx|mts|js|mjs)$/;
+
 /** @type {{id:string,title:string,ref:string,violations:string[]}[]} */
 const checks = [
   {
@@ -43,6 +49,12 @@ const checks = [
     violations: [],
   },
   {
+    id: 'SEC-001',
+    title: 'No private key or credential material in tracked files',
+    ref: 'module1.md 10 - plaintext credentials never reach the repository',
+    violations: [],
+  },
+  {
     id: 'DB-001',
     title: 'No raw pg Pool outside packages/db',
     ref: 'module1.md 4.1 — RLS tenant context helper is the only sanctioned path',
@@ -58,7 +70,7 @@ function walk(dir) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
       walk(full);
-    } else if (/\.(ts|tsx|mts|js|mjs)$/.test(entry)) {
+    } else if (!SKIP_FILES.test(entry) && /\.(ts|tsx|mts|js|mjs|json|ya?ml|pem|key|sql)$/.test(entry)) {
       inspect(full);
     }
   }
@@ -69,8 +81,17 @@ function inspect(file) {
   const src = readFileSync(file, 'utf8');
   const lines = src.split('\n');
 
+  const isSource = SOURCE.test(rel);
+
   lines.forEach((line, i) => {
     const at = `${rel}:${i + 1}`;
+
+    // Credential material is a problem in ANY file type.
+    if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(line)) {
+      byId['SEC-001'].violations.push(at);
+    }
+    if (!isSource) return;
+
     const code = line.replace(/\/\/.*$/, '');
 
     if (/\bVEGA\b/.test(code) && rel !== 'packages/shared/src/brand.ts') {

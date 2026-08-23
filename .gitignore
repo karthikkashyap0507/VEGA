@@ -14,6 +14,19 @@ out/
 .env.*
 !.env.example
 
+# credential material - deny by default, allow only placeholders
+infra/docker/secrets/*
+!infra/docker/secrets/.gitkeep
+*.pem
+*.key
+*.p12
+*.pfx
+*-key.json
+*service-account*.json
+*credentials*.json
+# Zitadel downloads keys named <keyId>.json
+[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*.json
+
 # local data
 *.log
 coverage/
