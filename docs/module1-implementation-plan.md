@@ -39,19 +39,25 @@ Track progress in the checkboxes. When a step's DoD is met, commit it.
 
 ---
 
-## Step 1 — Workspace skeleton compiles (2–3 days)
+## Step 1 — Workspace skeleton compiles ✅ COMPLETE
 
-The scaffold exists; make it build.
+- [x] `packages/shared` — `brand.ts`, `errors.ts`, `ids.ts`, `logging.ts` (pino with redaction)
+- [x] `packages/contracts` — Zod schemas for `Tenant`, `User`, `Workspace`, `Agent`, `Role`,
+      `Plan`, entitlements, and the Problem Details envelope
+- [x] `packages/telemetry` — OTel init, trace-id correlation helper, tenant span attributes
+- [x] Task graph wired; `typecheck`, `lint`, `test` green across 21 packages
+- [x] 26 tests passing, including redaction and the D-10 entitlement guard
 
-- [ ] `packages/shared` — `brand.ts`, `errors.ts`, `ids.ts`, plus `logging.ts` (pino, redaction
-      of anything token-shaped)
-- [ ] `packages/contracts` — Zod schemas for `Tenant`, `User`, `Workspace`, `Agent`, `Role`,
-      `Plan`, and the Problem Details envelope
-- [ ] `packages/telemetry` — OTel init, `traceparent` propagation, and the log-field convention:
-      **every log line carries `tenant_id` and `trace_id`**
-- [ ] Wire `turbo.json` task graph; `pnpm typecheck` green across the workspace
+**DoD met:** `pnpm install && pnpm typecheck && pnpm lint && pnpm test` all green from cold.
 
-**DoD:** `pnpm install && pnpm typecheck && pnpm lint` passes from a cold clone.
+### Decisions taken during Step 1
+
+| Decision | Why |
+|---|---|
+| **Task runner is a single root `tsc` project, not Turborepo** | On this machine pnpm is an npm-global shim, which turbo cannot resolve (`cannot find binary path`), and nested `pnpm` calls inside scripts fail the same way. One root project also typechecks 21 packages faster than 21 `tsc` processes. `turbo.json` is retained for when caching is needed — revisit on WSL2/CI. |
+| **OpenTelemetry 2.x, not 1.30** | `^1.30.0` resolved to the pre-2.0 API (`new Resource()` + `addSpanProcessor`). 2.x is current in 2026 and has the `resourceFromAttributes` / `spanProcessors` API. |
+| **Taint, reversibility, and risk-tier enums deliberately NOT defined** | They belong to the modules that own their semantics (M3, M2/M6, M5). Inventing them now invites a definition that does not survive contact with the spec. |
+| **`createLogger` takes an optional destination** | Needed to assert redaction in tests. A security property nobody tests is a security property nobody has. |
 
 **Watch for:** `packages/contracts` is imported by every plane. Treat it as a published API from
 day one — additive changes only.

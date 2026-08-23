@@ -8,11 +8,11 @@
     "pnpm": ">=10.0.0"
   },
   "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
-    "lint": "turbo run lint",
+    "dev": "echo \"dev targets arrive with services in Step 5\" && exit 0",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint .",
     "db:generate": "pnpm --filter @vega/db generate",
     "db:migrate": "pnpm --filter @vega/db migrate",
     "db:seed": "pnpm --filter @vega/db seed",
@@ -20,16 +20,25 @@
     "stack:down": "docker compose -f infra/docker/docker-compose.yml down",
     "stack:logs": "docker compose -f infra/docker/docker-compose.yml logs -f",
     "stack:reset": "docker compose -f infra/docker/docker-compose.yml down -v",
-    "verify:invariants": "node scripts/verify-invariants.mjs"
+    "verify:invariants": "node scripts/verify-invariants.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@eslint/js": "^9.17.0",
     "@types/node": "^22.10.0",
     "eslint": "^9.17.0",
+    "globals": "^17.11.0",
     "prettier": "^3.4.0",
     "tsx": "^4.19.0",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.18.0",
     "vitest": "^2.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

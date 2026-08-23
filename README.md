@@ -15,8 +15,21 @@
 
 ## Status
 
-**Module 1 — Foundation & Tenancy.** Scaffold in place; implementation not started.
-Follow [docs/module1-implementation-plan.md](docs/module1-implementation-plan.md).
+**Module 1 — Foundation & Tenancy.** Step 1 of 9 complete.
+
+| Step | | |
+|---|---|---|
+| 1 | Workspace skeleton compiles | ✅ |
+| 2 | Database with RLS ⚠ | next |
+| 3 | Identity (Zitadel) | |
+| 4 | Authorization (OpenFGA) | |
+| 5 | API surface | |
+| 6 | Web shell | |
+| 7 | Self-serve signup | |
+| 8 | Plane separation ⚠ | |
+| 9 | CI gates + invariant enforcement | |
+
+Plan: [docs/module1-implementation-plan.md](docs/module1-implementation-plan.md)
 
 ---
 
@@ -48,6 +61,14 @@ paid key you need is Anthropic, at Module 3.
 
 Requires Node 22+, pnpm 10+, Docker. On Windows, **develop inside WSL2** — path handling and file
 watching differ enough to produce bugs that only appear in CI (docs/TECHSTACK.md §20).
+
+### Task runner
+
+`typecheck`, `lint`, and `test` run from a **single root project** rather than through Turborepo.
+Turbo cannot resolve pnpm when it is installed as an npm-global shim (`cannot find binary path`),
+and nested `pnpm` calls inside package scripts fail the same way — both are common on Windows.
+One root `tsc` project is also faster than 21 separate processes at this size. `turbo.json` is
+kept for when build caching earns its place; revisit once the team is on WSL2 or CI.
 
 ---
 

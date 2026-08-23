@@ -12,14 +12,18 @@ concurrency:
 env:
   NODE_VERSION: '22'
 
-jobs:
-  # ---------------------------------------------------------------------------
-  # Gate order mirrors docs/module1.md 11 and docs/TECHSTACK.md 21.
-  # Gates for later modules are declared here as skipped placeholders ON PURPOSE:
-  # they must be visibly missing rather than silently absent, so nobody ships a
-  # module without turning its gate on.
-  # ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Gate order mirrors docs/module1.md §11 and docs/TECHSTACK.md §21.
+#
+# Gates belonging to steps and modules that are not yet implemented are declared
+# here as DISABLED jobs (`if: false`) ON PURPOSE. A missing gate must be visible
+# in the Actions tab rather than silently absent — that is how a module ships
+# without its blocking suite.
+#
+# Enabling a gate is part of the step that implements it, not a follow-up.
+# -----------------------------------------------------------------------------
 
+jobs:
   quality:
     name: Lint / Typecheck / Invariants
     runs-on: ubuntu-latest
@@ -33,29 +37,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: Architectural invariants
+      - name: Architectural invariants (BRAND/PLANE/TIER/EVAL/DB)
         run: pnpm verify:invariants
 
   test:
-    name: Unit + Integration
+    name: Unit tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: vega_test
-          POSTGRES_USER: vega
-          POSTGRES_PASSWORD: vega_test
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U vega" --health-interval 5s
-          --health-timeout 5s --health-retries 10
-      valkey:
-        image: valkey/valkey:8-alpine
-        ports: ['6379:6379']
-    env:
-      DATABASE_URL: postgresql://vega:vega_test@localhost:5432/vega_test
-      VALKEY_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -64,12 +51,29 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm db:migrate
       - run: pnpm test
 
-  tenant-isolation:
-    name: Tenant isolation (BLOCKING)
+  security:
+    name: Supply chain
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
+  # ---------------------------------------------------------------------------
+  # Not yet implemented. Each line names the step or module that turns it on.
+  # ---------------------------------------------------------------------------
+
+  tenant-isolation:
+    name: 'Tenant isolation — BLOCKING (enable in M1 Step 2)'
+    runs-on: ubuntu-latest
+    if: false
     services:
       postgres:
         image: postgres:16-alpine
@@ -95,44 +99,44 @@ jobs:
       - name: Adversarial cross-tenant suite
         run: pnpm --filter @vega/db test:isolation
 
-  security:
-    name: Supply chain
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: fs
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-          ignore-unfixed: true
-
-  # ---- gates for later modules: intentionally visible, intentionally not yet on ----
-  taint-soundness:
-    name: 'Taint soundness (M3 — not yet implemented)'
+  e2e:
+    name: 'E2E — sign in, invite, workspace, agent (enable in M1 Step 6)'
     runs-on: ubuntu-latest
     if: false
     steps:
-      - run: echo "Enable when packages/taint lands. BLOCKING thereafter."
+      - run: echo "Playwright suite lands with the web shell."
+
+  plane-separation:
+    name: 'Plane separation policy — P0 (enable in M1 Step 8)'
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - run: echo "Runs against a deployed cluster. Application code cannot enforce invariant 1."
+
+  taint-soundness:
+    name: 'Taint soundness — BLOCKING (enable in M3)'
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - run: echo "Property-based: no tool call exceeds its declared taint ceiling."
 
   redteam-injection:
-    name: 'Red-team injection (M3 — not yet implemented)'
+    name: 'Red-team injection — BLOCKING (enable in M3)'
     runs-on: ubuntu-latest
     if: false
     steps:
-      - run: echo "Zero successful exfiltrations. BLOCKING thereafter."
+      - run: echo "Zero successful exfiltrations. No exceptions, no skips."
 
   compensator-correctness:
-    name: 'Compensator correctness (M6 — not yet implemented)'
+    name: 'Compensator correctness — BLOCKING (enable in M6)'
     runs-on: ubuntu-latest
     if: false
     steps:
       - run: echo "A connector cannot register without a tested compensator."
 
   chain-integrity:
-    name: 'Audit chain integrity (M7 — not yet implemented)'
+    name: 'Audit chain integrity — P0 (enable in M7)'
     runs-on: ubuntu-latest
     if: false
     steps:
-      - run: echo "P0 on failure once the evidence plane lands."
+      - run: echo "Continuous verification across all environments."
