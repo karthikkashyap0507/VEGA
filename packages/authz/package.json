@@ -9,5 +9,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint ."
+  },
+  "dependencies": {
+    "@openfga/syntax-transformer": "^0.2.2"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
   }
 }

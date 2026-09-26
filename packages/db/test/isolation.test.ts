@@ -27,6 +27,8 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'secret_refs', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'platform_events', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'workspace_members', idColumn: 'workspace_id', tenantColumn: 'tenant_id' },
+  { table: 'sessions', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'idempotency_keys', idColumn: 'key', tenantColumn: 'tenant_id' },
 ];
 
 let appPool: pg.Pool;

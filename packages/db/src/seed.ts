@@ -147,6 +147,19 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
         [tenantId],
       );
 
+      // Session and idempotency rows exist so the isolation suite has something to try to
+      // steal. The token hash is random; no cookie anywhere corresponds to it.
+      await client.query(
+        `INSERT INTO sessions (tenant_id, user_id, token_hash, expires_at, absolute_expires_at)
+         VALUES ($1, $2, gen_random_bytes(32), now() + interval '1 hour', now() + interval '1 day')`,
+        [tenantId, userId],
+      );
+      await client.query(
+        `INSERT INTO idempotency_keys (tenant_id, principal_id, key, method, path, request_hash)
+         VALUES ($1, $2, 'seed-' || gen_random_uuid(), 'POST', '/v1/workspaces', gen_random_bytes(32))`,
+        [tenantId, userId],
+      );
+
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;
       made['workspace' + key] = workspaceId;

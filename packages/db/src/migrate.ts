@@ -14,6 +14,9 @@ import pg from 'pg';
  * Runs as the OWNER (DATABASE_URL). The application never has DDL rights.
  */
 
+/** Arbitrary but fixed: the advisory-lock key every migration runner contends on. */
+const MIGRATION_LOCK_KEY = 0x76656761; // 'vega'
+
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 
 export async function migrate(connectionString?: string): Promise<string[]> {
@@ -25,6 +28,10 @@ export async function migrate(connectionString?: string): Promise<string[]> {
   const applied: string[] = [];
 
   try {
+    // Serialise concurrent runners (several replicas booting at once, or parallel test files).
+    // Session-level advisory lock: released on disconnect even if this process dies mid-run.
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
         name       text PRIMARY KEY,

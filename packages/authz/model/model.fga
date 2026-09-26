@@ -1,0 +1,54 @@
+model
+  schema 1.1
+
+# =============================================================================
+# Authorization model — docs/module1.md §5.3 (roles) and §5.4 (relationships).
+#
+# Checked in as DSL because this file is what a security reviewer reads. The JSON form
+# OpenFGA stores is derived from it at load time and never edited by hand.
+#
+# Extensions over the §5.4 sketch, each for a stated reason:
+#   · tenant.owner / tenant.member      — §5.3 OWNER and "every user belongs to a tenant"
+#   · tenant.non_executor               — §5.3: COMPLIANCE_OFFICER and AUDITOR "cannot
+#                                         execute". Enforced HERE, so adding one of them to
+#                                         a workspace can never quietly grant can_run_agent.
+#   · workspace.owner / can_manage      — workspace administration without tenant admin
+#   · agent.workspace / can_run         — M4 checks the agent, not just the workspace
+# =============================================================================
+
+type user
+
+type tenant
+  relations
+    define owner: [user]
+    define admin: [user] or owner
+    define compliance: [user]
+    define auditor: [user]
+    define member: [user] or admin or compliance or auditor
+    define non_executor: compliance or auditor
+
+type workspace
+  relations
+    define tenant: [tenant]
+    define owner: [user]
+    define admin: [user] or owner or admin from tenant
+    define member: [user] or admin
+    define can_run_agent: member but not non_executor from tenant
+    define can_manage: admin
+    define can_view_audit: admin or auditor from tenant or compliance from tenant
+
+type agent
+  relations
+    define workspace: [workspace]
+    define owner: [user]
+    define can_run: (owner or can_run_agent from workspace) but not non_executor from tenant_of
+    define tenant_of: [tenant]
+    define can_manage: owner or can_manage from workspace
+
+# Unused until Module 9 (ACL-aware retrieval), defined now: retrofitting a type into a live
+# model means rewriting tuples (implementation plan Step 4).
+type document
+  relations
+    define parent: [workspace]
+    define viewer: [user, user:*]
+    define can_read: viewer or member from parent

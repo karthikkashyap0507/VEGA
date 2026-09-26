@@ -8,6 +8,7 @@
  *
  *   node scripts/verify-invariants.mjs
  */
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
@@ -112,7 +113,46 @@ function inspect(file) {
   });
 }
 
-walk(ROOT);
+/**
+ * The files that could reach the repository: tracked, plus untracked-but-not-ignored.
+ * Gitignored local material (`.env`, downloaded IdP keys under infra/docker/secrets/) exists
+ * on a developer's disk by design and is not what SEC-001 guards against. Falls back to a
+ * filesystem walk outside a git checkout (e.g. a source tarball).
+ */
+function candidateFiles() {
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return out
+      .split('\0')
+      .filter(Boolean)
+      .filter((rel) => !rel.split('/').some((part) => SKIP_DIRS.has(part)))
+      .filter((rel) => {
+        const name = rel.split('/').pop() ?? '';
+        return !SKIP_FILES.test(name) && /\.(ts|tsx|mts|js|mjs|json|ya?ml|pem|key|sql)$/.test(name);
+      })
+      .map((rel) => join(ROOT, rel));
+  } catch {
+    return null;
+  }
+}
+
+const files = candidateFiles();
+if (files) {
+  for (const file of files) {
+    try {
+      inspect(file);
+    } catch (error) {
+      // A file listed by git but deleted in the working tree is not a violation.
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+} else {
+  walk(ROOT);
+}
 
 let failed = 0;
 console.log('\nArchitectural invariants\n' + '='.repeat(60));

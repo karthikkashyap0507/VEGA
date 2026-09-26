@@ -1,6 +1,7 @@
 import {
   bigserial,
   customType,
+  inet,
   index,
   integer,
   jsonb,
@@ -146,6 +147,53 @@ export const platformEvents = pgTable('platform_events', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Browser sessions (module1.md §8.1). The cookie holds an opaque token; only its SHA-256 is
+ * stored. Upstream IdP tokens are envelope-encrypted as a single blob.
+ */
+export const sessions = pgTable('sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  tokenHash: bytea('token_hash').notNull(),
+  previousTokenHash: bytea('previous_token_hash'),
+  previousValidUntil: timestamp('previous_valid_until', { withTimezone: true }),
+  idpWrappedDek: bytea('idp_wrapped_dek'),
+  idpCiphertext: bytea('idp_ciphertext'),
+  idpIv: bytea('idp_iv'),
+  idpAuthTag: bytea('idp_auth_tag'),
+  idpKmsKeyId: text('idp_kms_key_id'),
+  idpCheckedAt: timestamp('idp_checked_at', { withTimezone: true }).notNull().defaultNow(),
+  userAgent: text('user_agent'),
+  ip: inet('ip'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  rotatedAt: timestamp('rotated_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokeReason: text('revoke_reason'),
+});
+
+/** module1.md §7.2 — every mutating endpoint accepts Idempotency-Key; stored 24h. */
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    tenantId: uuid('tenant_id').notNull(),
+    principalId: uuid('principal_id').notNull(),
+    key: text('key').notNull(),
+    method: text('method').notNull(),
+    path: text('path').notNull(),
+    requestHash: bytea('request_hash').notNull(),
+    state: text('state').notNull().default('in_progress'),
+    statusCode: integer('status_code'),
+    responseBody: jsonb('response_body'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.principalId, t.key] })],
+);
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -154,6 +202,8 @@ export const TENANT_SCOPED_TABLES = [
   'agents',
   'secret_refs',
   'platform_events',
+  'sessions',
+  'idempotency_keys',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

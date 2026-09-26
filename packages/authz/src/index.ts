@@ -1,5 +1,6 @@
-// @vega/authz - implemented in Step 4 of docs/module1-implementation-plan.md
-//
-// Owns: OpenFGA client, can(), tuple writers, batch check. The `document` type is defined
-// early because retrofitting a type into a live authorization model means re-writing tuples.
-export {};
+// @vega/authz — OpenFGA client, role model, tuple lifecycle (module1.md §5.3–§5.4).
+export * from './client.js';
+export * from './model.js';
+export * from './objects.js';
+export * from './roles.js';
+export * from './tuples.js';
