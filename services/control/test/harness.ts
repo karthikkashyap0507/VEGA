@@ -53,14 +53,14 @@ function clientFor(app: FastifyInstance, headers: () => Promise<Record<string, s
   });
 }
 
-export async function createHarness(): Promise<Harness> {
+export async function createHarness(extra: Partial<ControlDeps> = {}): Promise<Harness> {
   await migrate(process.env['DATABASE_URL']);
   const storeId = await fgaAdmin.createStore({ apiUrl: FGA_URL }, `control-test-${Date.now()}`);
   const modelId = await fgaAdmin.writeModel({ apiUrl: FGA_URL }, storeId, modelToJson());
   const fga = new FgaClient({ apiUrl: FGA_URL, storeId, modelId });
   const identity = new InMemoryIdentityAdmin();
   const logger = silent();
-  const deps: ControlDeps = { identity, fga, logger, returnInviteCodes: true };
+  const deps: ControlDeps = { identity, fga, logger, returnInviteCodes: true, ...extra };
 
   const issuer = await PrincipalAssertionIssuer.ephemeral('gateway', 'control');
   const verifier = new PrincipalAssertionVerifier(issuer.jwks, 'gateway', 'control');

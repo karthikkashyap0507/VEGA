@@ -40,6 +40,7 @@ export const CAPABILITIES = [
   'agents.create',
   'agents.manage',
   'agents.run',
+  'connectors.read',
   'connectors.manage',
   'policy.read',
   'policy.manage',
@@ -80,6 +81,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, ReadonlySet<Capability>>> 
     'users.read',
     'workspaces.read',
     'agents.read',
+    'connectors.read',
     'policy.read',
     'audit.read',
     'audit.read_bodies',
@@ -90,6 +92,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, ReadonlySet<Capability>>> 
     'tenant.read',
     'workspaces.read',
     'agents.read',
+    'connectors.read',
     'agents.create',
     'agents.manage',
     'agents.run',
@@ -103,7 +106,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, ReadonlySet<Capability>>> 
     'approvals.decide',
   ]),
   MEMBER: new Set<Capability>(['tenant.read', 'workspaces.read', 'agents.read', 'agents.run']),
-  AUDITOR: new Set<Capability>(['tenant.read', 'users.read', 'workspaces.read', 'agents.read', 'audit.read']),
+  AUDITOR: new Set<Capability>(['tenant.read', 'users.read', 'workspaces.read', 'agents.read', 'connectors.read', 'audit.read']),
 };
 
 /** Capabilities that act on the world. Roles that "cannot execute" must hold none of them. */

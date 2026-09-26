@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -18,6 +18,12 @@ import pg from 'pg';
 const MIGRATION_LOCK_KEY = 0x76656761; // 'vega'
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
+/**
+ * Reference data GENERATED from code (e.g. tool_declarations from the connector registry).
+ * Unlike migrations these are re-applied on every run: each file is an idempotent upsert of
+ * what the code says, so the database projection can never drift from the source of truth.
+ */
+const REFERENCE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'reference');
 
 export async function migrate(connectionString?: string): Promise<string[]> {
   const url = connectionString ?? process.env['DATABASE_URL'];
@@ -80,6 +86,17 @@ export async function migrate(connectionString?: string): Promise<string[]> {
       } catch (error) {
         await client.query('ROLLBACK');
         throw new Error(`migration ${file} failed: ${(error as Error).message}`, { cause: error });
+      }
+    }
+
+    for (const file of existsSync(REFERENCE_DIR) ? readdirSync(REFERENCE_DIR).filter((f) => f.endsWith('.sql')).sort() : []) {
+      await client.query('BEGIN');
+      try {
+        await client.query(readFileSync(join(REFERENCE_DIR, file), 'utf8'));
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw new Error(`reference data ${file} failed: ${(error as Error).message}`, { cause: error });
       }
     }
   } finally {

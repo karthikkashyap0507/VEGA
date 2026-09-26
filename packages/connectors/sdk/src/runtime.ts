@@ -73,8 +73,17 @@ export interface InvocationStore {
   fail(tenantId: string, toolId: string, key: string, code: string, release: boolean): Promise<void>;
 }
 
+/**
+ * Tools that are not compiled in: MCP tools discovered per tenant (module2.md §5.6). Resolved
+ * after the static registry; the connector definition is the registry's entry for their kind.
+ */
+export interface DynamicToolSource {
+  resolve(tenantId: string, toolId: string): Promise<AnyTool | undefined>;
+}
+
 export interface RuntimeDeps {
   registry: ToolRegistry;
+  dynamicTools?: DynamicToolSource;
   connectors: ConnectorStore;
   vault: TokenVault;
   invocations: InvocationStore;
@@ -95,8 +104,8 @@ export interface InvokeInput {
   connectorId: string;
   toolId: string;
   args: unknown;
-  runId?: string;
-  nodeId?: string;
+  runId?: string | undefined;
+  nodeId?: string | undefined;
 }
 
 const DEFAULT_BUCKET: BucketSpec = { capacity: 20, refillPerSecond: 5 };
@@ -128,10 +137,21 @@ export class ConnectorRuntime {
 
   constructor(private readonly deps: RuntimeDeps) {}
 
-  private resolve(toolId: string): { tool: AnyTool; def: ConnectorDefinition } {
+  private async resolve(tenantId: string, toolId: string): Promise<{ tool: AnyTool; def: ConnectorDefinition }> {
     const found = this.deps.registry.get(toolId);
-    if (!found) throw new ToolError('NOT_FOUND', `unknown tool ${toolId}`, { committed: 'no' });
-    return { tool: found.tool, def: found.connector };
+    if (found) return { tool: found.tool, def: found.connector };
+    const dynamic = await this.deps.dynamicTools?.resolve(tenantId, toolId);
+    const def = dynamic ? this.deps.registry.connector(dynamic.connectorKind) : undefined;
+    if (!dynamic || !def) throw new ToolError('NOT_FOUND', `unknown tool ${toolId}`, { committed: 'no' });
+    return { tool: dynamic, def };
+  }
+
+  /** The declaration the runtime would execute — static or dynamic — for callers that inspect it. */
+  async describe(tenantId: string, toolId: string): Promise<AnyTool | undefined> {
+    return this.resolve(tenantId, toolId).then(
+      (r) => r.tool,
+      () => undefined,
+    );
   }
 
   private async loadConnector(input: InvokeInput, tool: AnyTool): Promise<ConnectorRecord> {
@@ -194,7 +214,8 @@ export class ConnectorRuntime {
   }
 
   private async context(input: InvokeInput, c: ConnectorRecord, def: ConnectorDefinition, idempotencyKey?: string): Promise<ToolContext> {
-    const needsAuth = def.provider !== 'none';
+    // MCP servers may be unauthenticated: no credential stored means no Authorization header.
+    const needsAuth = def.provider !== 'none' && !(def.provider === 'mcp' && !c.secretRefId);
     const http = new ProviderHttp({
       baseUrl: this.deps.apiBase?.[def.kind] ?? def.apiBase,
       ...(needsAuth
@@ -244,7 +265,7 @@ export class ConnectorRuntime {
     return this.tracer.startActiveSpan(`simulate ${input.toolId}`, async (span) => {
       span.setAttributes({ tool_id: input.toolId, connector_id: input.connectorId, ...(input.runId ? { run_id: input.runId } : {}) });
       try {
-        const { tool, def } = this.resolve(input.toolId);
+        const { tool, def } = await this.resolve(input.tenantId, input.toolId);
         const c = await this.loadConnector(input, tool);
         const args = this.parseArgs(tool, input.args);
         await this.deps.buckets.take(`${input.tenantId}:${c.id}`, this.deps.rateLimits?.[def.kind] ?? DEFAULT_BUCKET);
@@ -269,7 +290,7 @@ export class ConnectorRuntime {
       let key: string | undefined;
       let tool: AnyTool | undefined;
       try {
-        const resolved = this.resolve(input.toolId);
+        const resolved = await this.resolve(input.tenantId, input.toolId);
         tool = resolved.tool;
         const def = resolved.def;
         const c = await this.loadConnector(input, tool);
@@ -337,16 +358,34 @@ export class ConnectorRuntime {
     return { ok: false, error: { code: 'PROVIDER_ERROR', message: 'unexpected connector failure' } };
   }
 
+  /**
+   * An authenticated context for connector-level operations that are not tool calls (MCP
+   * discovery). Pending connectors are allowed: discovery happens before activation.
+   */
+  async connectorContext(tenantId: string, connectorId: string): Promise<{ record: ConnectorRecord; ctx: ToolContext }> {
+    const c = await this.deps.connectors.get(tenantId, connectorId);
+    if (!c) throw new ToolError('NOT_FOUND', 'connector not found', { committed: 'no' });
+    if (c.status === 'revoked') throw new ToolError('CONNECTOR_UNAVAILABLE', 'connector is revoked', { committed: 'no' });
+    const def = this.deps.registry.connector(c.kind);
+    if (!def) throw new ToolError('NOT_FOUND', `no connector implementation for ${c.kind}`, { committed: 'no' });
+    return { record: c, ctx: await this.context({ tenantId, connectorId, toolId: '', args: {} }, c, def) };
+  }
+
   /** Health probe (module2.md §6.4): runs the connector's own probe with its credential. */
-  async health(tenantId: string, connectorId: string): Promise<{ ok: boolean; latencyMs: number; detail?: string }> {
+  async health(tenantId: string, connectorId: string): Promise<{ ok: boolean; latencyMs: number; detail?: string; accountRef?: string }> {
     const c = await this.deps.connectors.get(tenantId, connectorId);
     if (!c) throw new ToolError('NOT_FOUND', 'connector not found', { committed: 'no' });
     const def = this.deps.registry.connector(c.kind);
     if (!def) throw new ToolError('NOT_FOUND', `no connector implementation for ${c.kind}`, { committed: 'no' });
     const ctx = await this.context({ tenantId, connectorId, toolId: '', args: {} }, c, def);
     try {
-      const report = await def.health(ctx);
+      const report: { ok: boolean; latencyMs: number; detail?: string; accountRef?: string } = await def.health(ctx);
       if (report.ok) await this.deps.connectors.markOk(tenantId, connectorId);
+      // The provider account behind the credential (mailbox, workspace): what the admin sees.
+      if (report.ok && def.accountRef) {
+        const ref = await def.accountRef(ctx).catch(() => undefined);
+        if (ref) report.accountRef = ref;
+      }
       await this.deps.connectors.setStatus(tenantId, connectorId, report.ok ? 'active' : c.status, {
         lastProbe: new Date().toISOString(),
         ok: report.ok,

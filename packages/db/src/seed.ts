@@ -121,6 +121,11 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
         `INSERT INTO connector_events (tenant_id, connector_id, kind) VALUES ($1, $2, 'seeded')`,
         [tenantId, conn.rows[0]!.id],
       );
+      await client.query(
+        `INSERT INTO mcp_tools (tenant_id, connector_id, tool_id, name, title, input_schema)
+         VALUES ($1, $2, 'mcp.seed.echo_' || substr(md5(random()::text), 1, 10), 'echo', 'Echo', '{"type":"object"}')`,
+        [tenantId, conn.rows[0]!.id],
+      );
 
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;

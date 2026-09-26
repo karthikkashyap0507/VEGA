@@ -1,5 +1,9 @@
 import { existsSync } from 'node:fs';
-import { createLogger, internalServerTls, loadTls, startHealthServer } from '@vega/shared';
+import { createLogger, internalServerTls, loadTls, mtlsFetch, startHealthServer } from '@vega/shared';
+import { PgTokenVault } from '@vega/connector-sdk';
+import { PgMcpToolStore } from '@vega/connector-mcp';
+import { launchRegistry, oauthClientsFromEnv } from '@vega/connectors';
+import { HttpExecutionClient } from './connectors/deps.js';
 import { assertNotSuperuser, migrate } from '@vega/db';
 import { FgaClient, fgaAdmin, modelToJson } from '@vega/authz';
 import { InMemoryIdentityAdmin, loadKeyFile, PrincipalAssertionVerifier, ZitadelAdmin, type IdentityAdmin } from '@vega/idp';
@@ -55,8 +59,30 @@ if (!tls) {
   if (production) throw new Error('TLS_* is required in production: the control plane only serves mTLS');
   logger.warn('DEV: serving plain HTTP; in a cluster the control plane requires mTLS client certificates');
 }
+
+// ---------------------------------------------------------------- connectors (Module 2)
+const executionToken = env['EXECUTION_INTERNAL_TOKEN'];
+const stateSecret = env['CONNECTOR_STATE_SECRET'] ?? env['SESSION_SECRET'];
+let connectors;
+if (executionToken && stateSecret) {
+  const oauthClients = oauthClientsFromEnv(env, env['GATEWAY_PUBLIC_URL'] ?? 'http://localhost:3001');
+  connectors = {
+    registry: launchRegistry(),
+    oauthClients,
+    vault: new PgTokenVault(),
+    execution: new HttpExecutionClient(env['EXECUTION_URL'] ?? 'http://localhost:3003', executionToken, tls ? mtlsFetch(tls) : undefined),
+    mcpStore: new PgMcpToolStore(),
+    stateSecret,
+  };
+  const missing = (['google', 'microsoft', 'slack'] as const).filter((p) => !oauthClients[p]);
+  if (missing.length) logger.warn({ providers: missing }, 'no OAuth client configured: these providers are unavailable');
+} else {
+  if (production) throw new Error('EXECUTION_INTERNAL_TOKEN and CONNECTOR_STATE_SECRET are required in production');
+  logger.warn('DEV: EXECUTION_INTERNAL_TOKEN or CONNECTOR_STATE_SECRET unset: connector procedures answer 503');
+}
+
 const app = await buildControlApp({
-  deps: { identity, fga, logger, returnInviteCodes: !production },
+  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}) },
   verifier,
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });

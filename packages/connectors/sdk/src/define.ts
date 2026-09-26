@@ -12,13 +12,28 @@ import type { AnyTool, ToolDeclaration } from './connector.js';
  * The database CHECK on tool_declarations is a fourth.
  */
 export class DeclarationError extends Error {
-  constructor(toolId: string, problems: string[]) {
+  constructor(
+    readonly toolId: string,
+    readonly problems: string[],
+  ) {
     super(`tool "${toolId}" has an invalid declaration:\n  - ${problems.join('\n  - ')}`);
     this.name = 'DeclarationError';
   }
 }
 
 export function defineTool<A extends z.ZodType, E extends z.ZodType>(decl: ToolDeclaration<A, E>): ToolDeclaration<A, E> {
+  const problems = validateDeclaration(decl);
+  if (problems.length) throw new DeclarationError(decl.toolId, problems);
+  return Object.freeze(decl);
+}
+
+/**
+ * For declarations that are DATA, not code — MCP tools discovered at runtime and declared by
+ * an admin. Same validation as defineTool; what it loses is the build-time check, which is
+ * why the lint rule allows this factory only in packages/connectors/mcp (and why MCP tools
+ * start from the most conservative declaration there is).
+ */
+export function defineRuntimeTool(decl: AnyTool): AnyTool {
   const problems = validateDeclaration(decl);
   if (problems.length) throw new DeclarationError(decl.toolId, problems);
   return Object.freeze(decl);

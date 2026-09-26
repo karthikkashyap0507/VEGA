@@ -1,9 +1,10 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { EvidenceAppendClient } from './evidence-append.js';
+import { registerConnectorApi, type ConnectorApiDeps } from './connectors.js';
 
 /**
- * Execution plane — Module 1 stub: health endpoints and plane wiring only (module1.md §5.1).
- * Module 3 adds the capability interpreter, Module 4 the orchestrator and connector runtime.
+ * Execution plane (module1.md §5.1). Module 2 adds the connector runtime behind an internal
+ * API (connectors.ts); Module 3 the capability interpreter; Module 4 the orchestrator.
  *
  * The one piece of wiring that is real from M1: `/readyz` proves the evidence append path is
  * configured, because from M4 on "no side effect occurs before its audit entry is committed"
@@ -11,6 +12,7 @@ import type { EvidenceAppendClient } from './evidence-append.js';
  */
 export async function buildExecutionApp(options: {
   evidence?: EvidenceAppendClient;
+  connectors?: ConnectorApiDeps;
   https?: Record<string, unknown>;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, ...(options.https ? { https: options.https } : {}) }) as unknown as FastifyInstance;
@@ -19,5 +21,6 @@ export async function buildExecutionApp(options: {
     const ready = Boolean(options.evidence);
     return reply.code(ready ? 200 : 503).send({ status: ready ? 'ready' : 'evidence_append_unconfigured' });
   });
+  if (options.connectors) registerConnectorApi(app, options.connectors);
   return app;
 }

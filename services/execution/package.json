@@ -14,13 +14,19 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@vega/connector-mcp": "workspace:*",
+    "@vega/connector-sdk": "workspace:*",
+    "@vega/connectors": "workspace:*",
+    "@vega/db": "workspace:*",
     "@vega/idp": "workspace:*",
     "@vega/shared": "workspace:*",
     "fastify": "^5.12.5",
+    "iovalkey": "^0.4.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "vitest": "^2.1.9",
-    "tsx": "^4.19.0"
+    "@vega/connector-testing": "workspace:*",
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.9"
   }
 }

@@ -1,5 +1,8 @@
 import { router } from '../trpc.js';
 import { agentsRouter } from './agents.js';
+import { connectorsRouter } from './connectors.js';
+import { mcpRouter } from './mcp.js';
+import { toolsRouter } from './tools.js';
 import { meRouter } from './me.js';
 import { signupRouter } from './signup.js';
 import { tenantsRouter } from './tenants.js';
@@ -12,6 +15,9 @@ export const appRouter = router({
   users: usersRouter,
   workspaces: workspacesRouter,
   agents: agentsRouter,
+  connectors: connectorsRouter,
+  tools: toolsRouter,
+  mcp: mcpRouter,
   signup: signupRouter,
 });
 

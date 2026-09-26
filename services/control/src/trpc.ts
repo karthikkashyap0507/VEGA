@@ -13,6 +13,7 @@ import {
 import type { IdentityAdmin, PrincipalClaims } from '@vega/idp';
 import type { ExposedFeatures, PlanLimits } from '@vega/contracts';
 import { tenantAttributes, type Span } from '@vega/telemetry';
+import type { ConnectorDeps } from './connectors/deps.js';
 
 /**
  * Control-plane RPC.
@@ -29,6 +30,8 @@ export interface ControlDeps {
   logger: Logger;
   /** Development only: return invite codes in the API response instead of emailing them. */
   returnInviteCodes?: boolean;
+  /** Module 2. Absent: connector procedures answer 503. */
+  connectors?: ConnectorDeps;
 }
 
 export interface Principal extends PrincipalClaims {

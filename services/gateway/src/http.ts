@@ -21,7 +21,7 @@ declare module 'fastify' {
   }
 }
 
-export type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+export type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface HandlerCtx<P, Q, B> {
   req: FastifyRequest;

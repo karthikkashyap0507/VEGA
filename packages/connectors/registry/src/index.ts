@@ -7,13 +7,14 @@ import { sharepoint } from '@vega/connector-sharepoint';
 import { slackConnector } from '@vega/connector-slack';
 import { web } from '@vega/connector-web';
 import { http } from '@vega/connector-http';
+import { mcp } from '@vega/connector-mcp';
 
 /**
- * The launch connector set (docs/module2.md §1.3, PROJECT.md §9.3). Importing this module
+ * The launch connector set (plus the MCP client, whose tools are discovered per tenant) (docs/module2.md §1.3, PROJECT.md §9.3). Importing this module
  * registers every tool through the registry's validation — a connector with an incomplete
  * declaration fails here at startup, in CI, and in the declaration-sync check.
  */
-export const LAUNCH_CONNECTORS: ConnectorDefinition[] = [gmail, gcal, gdrive, outlook, sharepoint, slackConnector, web, http];
+export const LAUNCH_CONNECTORS: ConnectorDefinition[] = [gmail, gcal, gdrive, outlook, sharepoint, slackConnector, web, http, mcp];
 
 export function launchRegistry(extra: ConnectorDefinition[] = []): ToolRegistry {
   const registry = new ToolRegistry();
@@ -21,4 +22,6 @@ export function launchRegistry(extra: ConnectorDefinition[] = []): ToolRegistry 
   return registry;
 }
 
-export { gmail, gcal, gdrive, outlook, sharepoint, slackConnector as slack, web, http };
+export { gmail, gcal, gdrive, outlook, sharepoint, slackConnector as slack, web, http, mcp };
+export { declarationsSql } from './declarations-sql.js';
+export { oauthClientsFromEnv } from './env.js';

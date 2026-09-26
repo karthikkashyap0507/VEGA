@@ -42,6 +42,8 @@ export default {
           paths: { type: 'array', items: { type: 'string' } },
           factory: { type: 'string' },
           requiredKeys: { type: 'array', items: { type: 'string' } },
+          runtimeFactory: { type: 'string' },
+          runtimeAllowedPaths: { type: 'array', items: { type: 'string' } },
         },
         additionalProperties: false,
       },
@@ -52,6 +54,7 @@ export default {
       spread: 'INVARIANT 4 (PROJECT.md §10.2): spreads are not allowed in a tool declaration — every field must be visible here.',
       reversibilityNotLiteral: 'INVARIANT 4 (PROJECT.md §10.2): "reversibility" must be a string literal (R0–R3) so the compensator rule can be checked.',
       compensatorRequired: 'INVARIANT 4 (PROJECT.md §10.2): a {{rev}} tool must declare "compensatorRef" — an irreversible effect needs its undo named up front.',
+      runtimeFactory: 'INVARIANT 4 (PROJECT.md §10.2): {{factory}}() skips the build-time check and is reserved for declarations that are data (MCP, in {{paths}}). Use defineTool({...}) here.',
       compensatorForbidden: 'INVARIANT 4 (PROJECT.md §10.2): a {{rev}} tool must not declare "compensatorRef" — {{why}}.',
     },
   },
@@ -60,8 +63,15 @@ export default {
     if (!inAny(relativePath(context), opts.paths ?? ['packages/connectors/'])) return {};
     const factory = opts.factory ?? 'defineTool';
     const required = opts.requiredKeys ?? REQUIRED_KEYS;
+    const runtimeFactory = opts.runtimeFactory ?? 'defineRuntimeTool';
+    const runtimePaths = opts.runtimeAllowedPaths ?? ['packages/connectors/mcp/'];
+    const runtimeAllowed = inAny(relativePath(context), runtimePaths);
     return {
       CallExpression(node) {
+        if (node.callee.type === 'Identifier' && node.callee.name === runtimeFactory && !runtimeAllowed) {
+          context.report({ node, messageId: 'runtimeFactory', data: { factory: runtimeFactory, paths: runtimePaths.join(', ') } });
+          return;
+        }
         if (node.callee.type !== 'Identifier' || node.callee.name !== factory) return;
         const arg = node.arguments[0];
         if (!arg || arg.type !== 'ObjectExpression') {

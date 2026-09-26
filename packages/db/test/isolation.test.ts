@@ -32,6 +32,7 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'connectors', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'tool_invocations', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'connector_events', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'mcp_tools', idColumn: 'id', tenantColumn: 'tenant_id' },
 ];
 
 let appPool: pg.Pool;

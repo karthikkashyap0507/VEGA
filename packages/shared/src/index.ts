@@ -5,3 +5,4 @@ export * from './logging.js';
 export * from './crypto.js';
 export * from './tls.js';
 export * from './health.js';
+export * from './sealed.js';

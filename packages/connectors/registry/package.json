@@ -15,6 +15,7 @@
     "@vega/connector-gdrive": "workspace:*",
     "@vega/connector-gmail": "workspace:*",
     "@vega/connector-http": "workspace:*",
+    "@vega/connector-mcp": "workspace:*",
     "@vega/connector-outlook": "workspace:*",
     "@vega/connector-sdk": "workspace:*",
     "@vega/connector-sharepoint": "workspace:*",
@@ -24,6 +25,8 @@
   },
   "devDependencies": {
     "@vega/connector-testing": "workspace:*",
+    "@vega/db": "workspace:*",
+    "pg": "^8.23.0",
     "vitest": "^2.1.9",
     "zod": "^4.6.5"
   }

@@ -14,6 +14,7 @@ import { consume, type RateStore } from './rate-limit.js';
 import { Sealer } from './sealed.js';
 import type { SessionService } from './sessions.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerConnectorRoutes } from './routes/connectors.js';
 import { registerResourceRoutes } from './routes/resources.js';
 import { registerSystemRoutes } from './routes/system.js';
 
@@ -287,6 +288,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   registerSystemRoutes(app, { registry, jwks: deps.jwks });
   registerAuthRoutes(app, hooks, deps, { loginSealer, cookieName });
   registerResourceRoutes(app, hooks, deps);
+  registerConnectorRoutes(app, hooks, deps);
 
   return app;
 }

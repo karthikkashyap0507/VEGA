@@ -266,6 +266,24 @@ export const connectorEvents = pgTable('connector_events', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const mcpTools = pgTable('mcp_tools', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  connectorId: uuid('connector_id').notNull(),
+  toolId: text('tool_id').notNull(),
+  name: text('name').notNull(),
+  title: text('title').notNull(),
+  description: text('description').notNull().default(''),
+  inputSchema: jsonb('input_schema').notNull(),
+  annotations: jsonb('annotations').notNull().default({}),
+  declaredBy: text('declared_by').notNull().default('default'),
+  declaration: jsonb('declaration'),
+  published: jsonb('published'),
+  declaredByUser: uuid('declared_by_user'),
+  declaredAt: timestamp('declared_at', { withTimezone: true }),
+  discoveredAt: timestamp('discovered_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -279,6 +297,7 @@ export const TENANT_SCOPED_TABLES = [
   'connectors',
   'tool_invocations',
   'connector_events',
+  'mcp_tools',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

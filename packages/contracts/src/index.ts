@@ -8,3 +8,4 @@ export * from './agent.js';
 export * from './entitlements.js';
 export * from './signup.js';
 export * from './tools.js';
+export * from './connectors.js';

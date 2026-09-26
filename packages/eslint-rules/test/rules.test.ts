@@ -102,8 +102,10 @@ tester.run('require-tool-declaration', rule('require-tool-declaration'), {
     { filename: file, code: tool(`reversibility: 'R0'`) },
     { filename: file, code: tool(`reversibility: 'R3', compensatorRef: null`) },
     { filename: at('services/control/src/x.ts'), code: `defineTool({})` }, // outside connectors: not its concern
+    { filename: at('packages/connectors/mcp/src/index.ts'), code: `defineRuntimeTool(body)` },
   ],
   invalid: [
+    { filename: file, code: `defineRuntimeTool(body)`, errors: [{ messageId: 'runtimeFactory' }] },
     {
       filename: file,
       code: tool(`reversibility: 'R1'`),
