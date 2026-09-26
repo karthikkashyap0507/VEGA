@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # =============================================================================
-# One image per plane service: gateway | control | execution | evidence.
+# One image per plane service: gateway | control | execution | evidence | web-fetch.
 #
 #   docker build -f infra/docker/service.Dockerfile --build-arg SERVICE=control -t <slug>/control .
 #
@@ -20,7 +20,7 @@ COPY apps/web/package.json ./apps/web/package.json
 # Absent the secret, nothing changes. It is never written into an image layer.
 RUN --mount=type=secret,id=extra_ca,required=false \
     if [ -s /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
-    pnpm install --frozen-lockfile --filter "./services/*" --filter "./packages/*" --filter "." \
+    pnpm install --frozen-lockfile --filter "./services/*" --filter "./packages/*" --filter "./packages/connectors/*" --filter "." \
   && pnpm store prune
 
 FROM node:22-alpine
@@ -29,6 +29,6 @@ ENV NODE_ENV=production SERVICE=${SERVICE}
 WORKDIR /app
 COPY --from=deps /app /app
 USER node
-EXPOSE 3001 3002 3003 3004
+EXPOSE 3001 3002 3003 3004 3005
 # tsx transpiles on load: the workspace packages export TypeScript sources directly.
 CMD ["sh", "-c", "exec node --import tsx services/${SERVICE}/src/main.ts"]

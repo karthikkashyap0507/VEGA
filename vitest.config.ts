@@ -6,6 +6,7 @@ export default defineConfig({
       'packages/*/test/**/*.test.ts',
       'packages/connectors/*/test/**/*.test.ts',
       'services/*/test/**/*.test.ts',
+      'evals/*/test/**/*.test.ts',
     ],
     environment: 'node',
     passWithNoTests: true,

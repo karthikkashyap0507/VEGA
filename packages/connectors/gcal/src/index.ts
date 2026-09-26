@@ -91,6 +91,17 @@ async function conflicts(ctx: ToolContext, start: string, end: string): Promise<
   return fb.calendars?.['primary']?.busy?.length ?? 0;
 }
 
+/** Does an event with this (idempotency-derived) id already exist? Then a prior attempt committed. */
+async function existing(ctx: ToolContext, id: string | undefined): Promise<GEvent | undefined> {
+  if (!id) return undefined;
+  try {
+    return await ctx.http.json<GEvent>(`${EVENTS}/${id}`);
+  } catch (error) {
+    if (error instanceof ToolError && error.code === 'NOT_FOUND') return undefined;
+    throw error;
+  }
+}
+
 const EventEffect = z.object({ eventId: z.string().nullable(), event: EventView.nullable(), conflicts: z.number().int() });
 
 export const list = defineTool({
@@ -165,8 +176,13 @@ export const create = defineTool({
   },
   async execute(args, ctx) {
     const id = eventIdFor(ctx);
+    // Conflicts are counted BEFORE creating, as simulate() does — after, the event overlaps itself.
+    // On a replay (our id exists) the earlier attempt's event is not a conflict with itself.
+    const prior = await existing(ctx, id);
+    const clash = Math.max(0, (await conflicts(ctx, args.start, args.end)) - (prior ? 1 : 0));
     let created: GEvent;
     try {
+      if (prior) throw new ToolError('CONFLICT', 'already created', { committed: 'no' });
       created = await ctx.http.json<GEvent>(EVENTS, {
         method: 'POST',
         query: { sendUpdates: 'all' },
@@ -194,7 +210,7 @@ export const create = defineTool({
         externalRecipients: externalOnly(args.attendees, ctx.internalDomains),
         recordsAffected: [{ system: 'gcal', id: created.id, after: view(created) }],
         reversibilityNote: 'Attendees were invited; undoing it sends them a cancellation.',
-        detail: { eventId: created.id, event: view(created), conflicts: 0 },
+        detail: { eventId: created.id, event: view(created), conflicts: clash },
       },
     };
   },
@@ -241,14 +257,24 @@ export const update = defineTool({
   effectSchema: EventEffect,
   async simulate(args, ctx) {
     const current = view(await ctx.http.json<GEvent>(`${EVENTS}/${encodeURIComponent(args.eventId)}`));
-    const next = { ...current, ...args.patch, attendees: args.patch.attendees ?? current.attendees };
+    const p = args.patch;
+    const next: typeof current = {
+      ...current,
+      summary: p.summary ?? current.summary,
+      description: p.description ?? current.description,
+      location: p.location ?? current.location,
+      start: p.start ?? current.start,
+      end: p.end ?? current.end,
+      attendees: p.attendees ?? current.attendees,
+    };
     return {
       summary: `Updates "${current.summary}" (${Object.keys(args.patch).join(', ')}).`,
       fidelity: 'DERIVED',
       externalRecipients: externalOnly(next.attendees, ctx.internalDomains),
       recordsAffected: [{ system: 'gcal', id: args.eventId, before: current, after: next }],
       reversibilityNote: 'Attendees are notified of the change; restoring it notifies them again.',
-      detail: { eventId: args.eventId, event: current, conflicts: 0 },
+      // The PREDICTED event after the change: what the approver is actually agreeing to.
+      detail: { eventId: args.eventId, event: next, conflicts: 0 },
     };
   },
   async execute(args, ctx) {

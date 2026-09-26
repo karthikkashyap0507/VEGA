@@ -1,0 +1,2 @@
+# Rule fixtures contain deliberate violations; CI checks them with `semgrep --config .semgrep/tokens.yml --no-git-ignore .semgrep/fixtures/` instead.
+.semgrep/fixtures/

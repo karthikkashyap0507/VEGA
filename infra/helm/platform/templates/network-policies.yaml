@@ -9,6 +9,9 @@
       execution   evidence     evidence /append port only (the service exposes nothing else)
       evidence    execution    NONE
       execution   evidence-db  NONE
+      execution   web-fetch    fetch API only (module2.md §10.3)
+      web-fetch   internet     80/443 to PUBLIC addresses only — private, link-local, loopback
+                               and cloud-metadata ranges are excluded at the network layer
 
   Every namespace starts at default-deny for ingress AND egress; each rule below opens one
   flow, named for what it is for. infra/tests/plane-separation.sh asserts the table.
@@ -33,6 +36,20 @@
 {{- range . }}
     - {{ . }}
 {{- end }}
+{{- end -}}
+{{- /* FQDN egress needs Cilium's DNS proxy to see the lookups: one L7 DNS rule per policy. */ -}}
+{{- define "fqdnEgress" -}}
+- toEndpoints:
+    - matchLabels: { k8s:io.kubernetes.pod.namespace: kube-system, k8s-app: kube-dns }
+  toPorts:
+    - ports: [{ port: "53", protocol: ANY }]
+      rules: { dns: [{ matchPattern: "*" }] }
+- toFQDNs:
+{{- range . }}
+    - matchName: {{ . | quote }}
+{{- end }}
+  toPorts:
+    - ports: [{ port: "443", protocol: TCP }]
 {{- end -}}
 
 {{- range $ns := list $ex $co $xe $ev }}
@@ -149,6 +166,11 @@ spec:
     - toCIDR: {{- include "cidrs" . }}
       toPorts: {{- include "tcp" (list 443 8080) | nindent 8 }}
     {{- end }}
+    # Module 2: authorization-code exchange and token revocation (the control plane holds the
+    # OAuth client secrets). Provider DATA APIs are not reachable from here.
+    {{- with .Values.network.egress.oauthProviders }}
+    {{- include "fqdnEgress" . | nindent 4 }}
+    {{- end }}
 
 # ============================================================ execution
 ---
@@ -176,6 +198,55 @@ spec:
     - toCIDR: {{- include "cidrs" . }}
       toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
     {{- end }}
+    # Module 2: the web is fetched by the isolated web-fetch pod, never by this one.
+    - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "web-fetch") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3005) | nindent 8 }}
+    {{- if .Values.devDependencies.enabled }}
+    - toEndpoints:
+        {{- include "peer" (dict "ns" $co "app" "valkey") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 6379) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.cache }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 6379) | nindent 8 }}
+    {{- end }}
+    # Connector runtime: provider data APIs and token refresh, by name.
+    {{- with .Values.network.egress.connectorApis }}
+    {{- include "fqdnEgress" . | nindent 4 }}
+    {{- end }}
+    # Attached MCP servers (tenant-configured), by CIDR, admitted explicitly per deployment.
+    {{- with .Values.network.egress.mcpServers }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 443 80) | nindent 8 }}
+    {{- end }}
+---
+# The isolated web fetcher (docs/module2.md §10.3). It ingests attacker-controlled content, so
+# the network does not trust it either: public addresses only, from exactly one caller.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: web-fetch, namespace: {{ $xe }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: web-fetch } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 9000) | nindent 8 }}
+    - fromEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3005) | nindent 8 }}
+  egress:
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+          {{- range .Values.network.webFetch.deniedRanges }}
+            - {{ . }}
+          {{- end }}
+        {{- if .Values.network.webFetch.ipv6 }}
+        - cidr: ::/0
+          except:
+          {{- range .Values.network.webFetch.deniedRangesV6 }}
+            - {{ . }}
+          {{- end }}
+        {{- end }}
+      toPorts: {{- include "tcp" (list 80 443) | nindent 8 }}
 
 # ============================================================ evidence
 ---

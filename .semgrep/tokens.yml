@@ -1,0 +1,43 @@
+# Token leak detection — docs/module2.md §10.1: "A Semgrep rule fails the build on any log
+# statement whose argument reaches a token type." Plaintext tokens exist only in memory during
+# a call; they never reach a logger, an error message, a span attribute or an HTTP response.
+# Validate with: semgrep --validate --config .semgrep/   (fixtures: .semgrep/fixtures/)
+rules:
+  - id: token-reaches-log
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      A credential (access/refresh token, client secret, API key) reaches a log call. Tokens
+      must never leave memory (module2.md §10.1). Log the connector id instead.
+    patterns:
+      - pattern-either:
+          - pattern: $LOG.$LEVEL(..., <... $X.accessToken ...>, ...)
+          - pattern: $LOG.$LEVEL(..., <... $X.refreshToken ...>, ...)
+          - pattern: $LOG.$LEVEL(..., <... $X.clientSecret ...>, ...)
+          - pattern: $LOG.$LEVEL(..., <... $X.apiKey ...>, ...)
+          - pattern: $LOG.$LEVEL(..., <... tokens ...>, ...)
+      - metavariable-regex:
+          metavariable: $LEVEL
+          regex: ^(trace|debug|info|warn|error|fatal|log)$
+  - id: token-in-error-message
+    languages: [typescript]
+    severity: ERROR
+    message: A credential is interpolated into an error message (module2.md §10.1).
+    pattern-either:
+      - pattern: new $E(`...${$X.accessToken}...`, ...)
+      - pattern: new $E(`...${$X.refreshToken}...`, ...)
+      - pattern: new $E(`...${$X.clientSecret}...`, ...)
+  - id: token-in-span-attribute
+    languages: [typescript]
+    severity: ERROR
+    message: A credential is recorded on a trace span (module2.md §10.1).
+    pattern-either:
+      - pattern: $SPAN.setAttribute($K, <... $X.accessToken ...>)
+      - pattern: $SPAN.setAttribute($K, <... $X.refreshToken ...>)
+  - id: full-mailbox-scope
+    languages: [typescript]
+    severity: ERROR
+    message: The full-mailbox scope is forbidden (module2.md §10.2). Use the narrowest scope per tool.
+    pattern: "'https://mail.google.com/'"
+    paths:
+      exclude: ['/packages/connectors/sdk/src/oauth.ts', '**/test/**', '/.semgrep/fixtures/**']

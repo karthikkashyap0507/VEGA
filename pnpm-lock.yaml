@@ -133,6 +133,31 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  evals/simulation:
+    dependencies:
+      '@vega/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connectors/sdk
+      '@vega/connector-testing':
+        specifier: workspace:*
+        version: link:../../packages/connectors/testing
+      '@vega/connector-web':
+        specifier: workspace:*
+        version: link:../../packages/connectors/web
+      '@vega/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors/registry
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
   packages/authz:
     dependencies:
       '@openfga/syntax-transformer':
@@ -144,8 +169,6 @@ importers:
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
   packages/compensators: {}
-
-  packages/connectors: {}
 
   packages/connectors/gcal:
     dependencies:
@@ -627,6 +650,9 @@ importers:
       '@vega/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connectors/sdk
+      '@vega/connector-web':
+        specifier: workspace:*
+        version: link:../../packages/connectors/web
       '@vega/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors/registry
@@ -722,6 +748,31 @@ importers:
       '@vega/authz':
         specifier: workspace:*
         version: link:../../packages/authz
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
+  services/web-fetch:
+    dependencies:
+      '@vega/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connectors/sdk
+      '@vega/connector-web':
+        specifier: workspace:*
+        version: link:../../packages/connectors/web
+      '@vega/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
       tsx:
         specifier: ^4.19.0
         version: 4.23.12

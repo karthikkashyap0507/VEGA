@@ -183,20 +183,31 @@ export const share = defineTool({
     };
   },
   async execute(args, ctx) {
-    const perm = await ctx.http.json<DPermission>(`${FILES}/${encodeURIComponent(args.fileId)}/permissions`, {
-      method: 'POST',
-      query: { sendNotificationEmail: true, fields: 'id,type,role,emailAddress' },
-      json: { type: 'user', role: args.role, emailAddress: args.email },
+    // Someone who already has access keeps their permission object: the compensator (M6) must
+    // restore THEIR prior role, never revoke access they had before this action.
+    const perms = await ctx.http.json<{ permissions?: DPermission[] }>(`${FILES}/${encodeURIComponent(args.fileId)}/permissions`, {
+      query: { fields: 'permissions(id,type,role,emailAddress)' },
     });
+    const prior = (perms.permissions ?? []).find((p) => p.emailAddress?.toLowerCase() === args.email.toLowerCase());
+    const perm =
+      prior && prior.role === args.role
+        ? prior
+        : await ctx.http.json<DPermission>(`${FILES}/${encodeURIComponent(args.fileId)}/permissions`, {
+            method: 'POST',
+            query: { sendNotificationEmail: !prior, fields: 'id,type,role,emailAddress' },
+            json: { type: 'user', role: args.role, emailAddress: args.email },
+          });
     return {
       providerRef: perm.id,
       effect: {
-        summary: `Shared with ${args.email} as ${args.role}.`,
+        summary: prior ? `${args.email} already had ${prior.role} access; now ${args.role}.` : `Shared with ${args.email} as ${args.role}.`,
         fidelity: 'PROVIDER',
         externalRecipients: externalOnly([args.email], ctx.internalDomains),
-        recordsAffected: [{ system: 'gdrive', id: args.fileId, field: 'permissions', after: { permissionId: perm.id, email: args.email, role: args.role } }],
-        reversibilityNote: 'The recipient was notified by email.',
-        detail: { fileId: args.fileId, permissionId: perm.id, email: args.email, role: args.role, alreadyHadAccess: false },
+        recordsAffected: [
+          { system: 'gdrive', id: args.fileId, field: 'permissions', before: prior ? { role: prior.role } : null, after: { permissionId: perm.id, email: args.email, role: args.role } },
+        ],
+        reversibilityNote: prior ? 'Undo restores their previous role.' : 'The recipient was notified by email.',
+        detail: { fileId: args.fileId, permissionId: perm.id, email: args.email, role: args.role, alreadyHadAccess: Boolean(prior) },
       },
     };
   },

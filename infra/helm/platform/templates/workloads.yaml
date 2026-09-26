@@ -14,10 +14,17 @@
                     (dict "name" "WEB_PUBLIC_URL" "value" .Values.publicUrls.web)))
   (dict "name" "control" "plane" "control" "port" 3002 "image" .Values.image.service "secret" .Values.secrets.control "internal" true
         "env" (list (dict "name" "SERVICE" "value" "control")
-                    (dict "name" "GATEWAY_JWKS_URL" "value" (printf "http://gateway.%s.svc:3001/.well-known/jwks.json" (include "ns.control" .)))))
+                    (dict "name" "GATEWAY_JWKS_URL" "value" (printf "http://gateway.%s.svc:3001/.well-known/jwks.json" (include "ns.control" .)))
+                    (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)
+                    (dict "name" "EXECUTION_URL" "value" (printf "%s://execution.%s.svc:3003" $scheme (include "ns.execution" .)))))
   (dict "name" "execution" "plane" "execution" "port" 3003 "image" .Values.image.service "secret" .Values.secrets.execution "internal" true
         "env" (list (dict "name" "SERVICE" "value" "execution")
-                    (dict "name" "EVIDENCE_URL" "value" (printf "%s://evidence.%s.svc:3004" $scheme (include "ns.evidence" .)))))
+                    (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)
+                    (dict "name" "EVIDENCE_URL" "value" (printf "%s://evidence.%s.svc:3004" $scheme (include "ns.evidence" .)))
+                    (dict "name" "WEB_FETCH_URL" "value" (printf "%s://web-fetch.%s.svc:3005" $scheme (include "ns.execution" .)))))
+  (dict "name" "web-fetch" "plane" "execution" "port" 3005 "image" .Values.image.service "secret" "" "internal" true
+        "env" (list (dict "name" "SERVICE" "value" "web-fetch")
+                    (dict "name" "SEARXNG_URL" "value" .Values.search.searxngUrl)))
   (dict "name" "evidence" "plane" "evidence" "port" 3004 "image" .Values.image.service "secret" .Values.secrets.evidence "internal" true
         "env" (list (dict "name" "SERVICE" "value" "evidence")))
 -}}
@@ -70,7 +77,7 @@ spec:
           env:
             - { name: NODE_ENV, value: {{ $.Values.environment | quote }} }
             - { name: HOST, value: "0.0.0.0" }
-            - { name: {{ printf "%s_PORT" (upper $wl.name) }}, value: {{ $wl.port | quote }} }
+            - { name: {{ printf "%s_PORT" (upper $wl.name | replace "-" "_") }}, value: {{ $wl.port | quote }} }
             {{- range $wl.env }}
             - { name: {{ .name }}, value: {{ .value | quote }} }
             {{- end }}

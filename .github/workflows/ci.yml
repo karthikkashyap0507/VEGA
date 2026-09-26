@@ -103,7 +103,7 @@ jobs:
         run: pnpm --filter @vega/db test:isolation
 
   e2e:
-    name: E2E — sign in, invite, workspace, agent (real IdP, real browser)
+    name: E2E — sign in, invite, workspace, agent, connectors (real IdP, real browser)
     runs-on: ubuntu-latest
     needs: [quality]
     steps:
@@ -126,6 +126,10 @@ jobs:
           sed -i "s#^LOCAL_KEK_BASE64=.*#LOCAL_KEK_BASE64=$(openssl rand -base64 32)#" .env
           echo "EVIDENCE_APPEND_TOKEN=$(openssl rand -hex 24)" >> .env
           echo "SIGNUP_ALLOW_PASSWORD=true" >> .env
+          sed -i "s#^EXECUTION_INTERNAL_TOKEN=.*#EXECUTION_INTERNAL_TOKEN=$(openssl rand -hex 24)#" .env
+          sed -i "s#^CONNECTOR_STATE_SECRET=.*#CONNECTOR_STATE_SECRET=$(openssl rand -base64 36 | tr -d '\n')#" .env
+          # A Google OAuth client id the E2E consent test can see in the (intercepted) redirect.
+          sed -i "s#^GOOGLE_CLIENT_ID=.*#GOOGLE_CLIENT_ID=e2e-google-client#; s#^GOOGLE_CLIENT_SECRET=.*#GOOGLE_CLIENT_SECRET=e2e-google-secret#" .env
       - name: Start the four planes and the web app
         run: |
           for s in evidence execution gateway control; do (pnpm --filter @vega/service-$s start > /tmp/$s.log 2>&1 &); sleep 3; done
@@ -169,6 +173,8 @@ jobs:
           kubectl wait --for=condition=available --timeout=300s deploy --all -n vega-evidence
       - name: Plane separation policy test
         run: infra/tests/plane-separation.sh
+      - name: Web-fetch isolation (SSRF at the network layer) — module2.md §13
+        run: infra/tests/web-fetch-isolation.sh
 
   security:
     name: Supply chain (Trivy, OSV, Semgrep)
@@ -183,7 +189,12 @@ jobs:
         with: { scan-args: '--lockfile=pnpm-lock.yaml' }
       - name: Semgrep
         uses: semgrep/semgrep-action@v1
-        with: { config: 'p/typescript p/nodejs p/secrets' }
+        with: { config: 'p/typescript p/nodejs p/secrets .semgrep/tokens.yml' }
+      - name: Token-leak rules still catch their fixtures (module2.md §10.1)
+        run: |
+          pipx install semgrep
+          n=$(semgrep --config .semgrep/tokens.yml --metrics=off --no-git-ignore --json .semgrep/fixtures/leaks.ts | jq '.results | length')
+          test "$n" -eq 4 || { echo "expected 4 findings on the fixture, got $n"; exit 1; }
 
   # ---------------------------------------------------------------------------
   # Not yet implemented. Each line names the module that turns it on.

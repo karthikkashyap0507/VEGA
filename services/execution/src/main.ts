@@ -10,6 +10,7 @@ import {
   type TokenBucket,
 } from '@vega/connector-sdk';
 import { McpToolSource, PgMcpToolStore } from '@vega/connector-mcp';
+import { remoteBackend, setWebBackend } from '@vega/connector-web';
 import { launchRegistry, oauthClientsFromEnv } from '@vega/connectors';
 import { buildExecutionApp } from './app.js';
 import { EvidenceAppendClient } from './evidence-append.js';
@@ -25,6 +26,11 @@ const tls = loadTls();
 if (!tls) logger.warn('DEV: plain HTTP; in a cluster execution serves and calls evidence over mTLS only');
 
 // ---------------------------------------------------------------- connector runtime (Module 2)
+// The web is fetched by the isolated web-fetch pod (module2.md §10.3), never from this process
+// in a cluster. Locally, unset WEB_FETCH_URL runs safeFetch in-process.
+const webFetchUrl = env['WEB_FETCH_URL'];
+if (webFetchUrl) setWebBackend(remoteBackend(webFetchUrl, tls ? mtlsFetch(tls) : undefined));
+else if (production) throw new Error('WEB_FETCH_URL is required in production: execution does not fetch the web itself');
 let buckets: TokenBucket = new MemoryTokenBucket();
 try {
   const valkey = new Valkey(env['VALKEY_URL'] ?? 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 });

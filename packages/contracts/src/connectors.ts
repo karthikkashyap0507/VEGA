@@ -71,6 +71,15 @@ export const HealthView = z.object({
   lastOkAt: Timestamp.nullable(),
   health: z.record(z.string(), z.unknown()),
   events: z.array(z.object({ kind: z.string(), detail: z.record(z.string(), z.unknown()), createdAt: Timestamp })),
+  /** Idempotency-ledger invocations over the last 7 days (KEYED tools). */
+  invocations: z.object({
+    succeeded: z.number().int(),
+    failed: z.number().int(),
+    inFlight: z.number().int(),
+    p50Ms: z.number().nullable(),
+    p99Ms: z.number().nullable(),
+    errors: z.array(z.object({ code: z.string(), count: z.number().int() })),
+  }),
 });
 
 export const ProbeResult = z.object({ ok: z.boolean(), latencyMs: z.number(), detail: z.string().optional() });

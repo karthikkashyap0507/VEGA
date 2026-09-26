@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { problems } from '@vega/shared';
 import { schema } from '@vega/db';
@@ -343,11 +343,39 @@ export const connectorsRouter = router({
         .orderBy(desc(schema.connectorEvents.createdAt), desc(schema.connectorEvents.id))
         .limit(25),
     );
+    const [stats] = await ctx.db((db) =>
+      db
+        .select({
+          succeeded: sql<number>`count(*) filter (where ${schema.toolInvocations.state} = 'succeeded')::int`,
+          failed: sql<number>`count(*) filter (where ${schema.toolInvocations.state} = 'failed')::int`,
+          inFlight: sql<number>`count(*) filter (where ${schema.toolInvocations.state} = 'in_flight')::int`,
+          p50: sql<number | null>`percentile_cont(0.5) within group (order by extract(epoch from ${schema.toolInvocations.finishedAt} - ${schema.toolInvocations.startedAt}) * 1000)`,
+          p99: sql<number | null>`percentile_cont(0.99) within group (order by extract(epoch from ${schema.toolInvocations.finishedAt} - ${schema.toolInvocations.startedAt}) * 1000)`,
+        })
+        .from(schema.toolInvocations)
+        .where(and(eq(schema.toolInvocations.connectorId, input.id), sql`${schema.toolInvocations.startedAt} > now() - interval '7 days'`)),
+    );
+    const errors = await ctx.db((db) =>
+      db
+        .select({ code: schema.toolInvocations.errorCode, count: sql<number>`count(*)::int` })
+        .from(schema.toolInvocations)
+        .where(and(eq(schema.toolInvocations.connectorId, input.id), sql`${schema.toolInvocations.errorCode} is not null`, sql`${schema.toolInvocations.startedAt} > now() - interval '7 days'`))
+        .groupBy(schema.toolInvocations.errorCode),
+    );
+    const ms = (v: number | null | undefined) => (v === null || v === undefined ? null : Math.round(Number(v)));
     return {
       status: row.status,
       lastOkAt: row.lastOkAt ? row.lastOkAt.toISOString() : null,
       health: row.healthJson as Record<string, unknown>,
       events: events.map((e) => ({ kind: e.kind, detail: e.detail as Record<string, unknown>, createdAt: e.createdAt.toISOString() })),
+      invocations: {
+        succeeded: stats?.succeeded ?? 0,
+        failed: stats?.failed ?? 0,
+        inFlight: stats?.inFlight ?? 0,
+        p50Ms: ms(stats?.p50),
+        p99Ms: ms(stats?.p99),
+        errors: errors.map((e) => ({ code: e.code ?? 'UNKNOWN', count: e.count })),
+      },
     };
   }),
 });

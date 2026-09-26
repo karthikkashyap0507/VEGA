@@ -194,6 +194,7 @@ describe('OAuth round-trip', () => {
     const health = await h.as(A.tenantId, A.userId).connectors.health.query({ id: connectorId });
     expect(health.events.map((e) => e.kind)).toEqual(expect.arrayContaining(['created', 'authorized']));
     expect(health.lastOkAt).not.toBeNull();
+    expect(health.invocations).toMatchObject({ succeeded: expect.any(Number), failed: expect.any(Number), errors: expect.any(Array) });
   });
 
   it('delete revokes at the provider FIRST, then deletes the stored secret', async () => {

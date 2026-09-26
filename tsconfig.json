@@ -11,6 +11,7 @@
     "packages/*/src/**/*",
     "packages/connectors/*/src/**/*",
     "services/*/src/**/*",
+    "evals/*/src/**/*",
     "scripts/**/*"
   ],
   "exclude": [

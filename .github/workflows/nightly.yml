@@ -1,0 +1,31 @@
+name: Nightly
+
+# docs/module2.md §11: "Simulation accuracy — Nightly; blocks promotion in M10". The report is
+# uploaded per run so trends are visible; the job fails when any held tool drops below 99%.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulation-accuracy:
+    name: Simulation accuracy (evals/simulation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Fake sandbox (always)
+        run: pnpm --filter @vega/eval-simulation eval
+      - name: Live provider sandboxes (when credentials are configured)
+        if: ${{ vars.CONNECTOR_SANDBOX == 'live' }}
+        env: { CONNECTOR_SANDBOX: live }
+        run: pnpm --filter @vega/eval-simulation eval
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: simulation-accuracy, path: evals/simulation/report/ }

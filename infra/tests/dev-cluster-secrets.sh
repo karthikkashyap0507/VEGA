@@ -4,12 +4,17 @@
 #
 # Note what each plane receives — and what it does not:
 #   control    primary DB (owner for dev migrations + app role), session secret, KEK, OpenFGA, Valkey
-#   execution  the evidence APPEND token and the primary app role. NO evidence-DB credential.
+#   execution  the evidence APPEND token, the primary app role, the connector KEK (it opens
+#              connector credentials to call providers) and the control→execution token.
+#              NO evidence-DB credential.
+#   web-fetch  NOTHING (module2.md §10.3).
 #   evidence   evidence owner + INSERT-only writer URLs, the append token, a dev signing key
 set -euo pipefail
 PREFIX="${PREFIX:-vega}"
 CO="${PREFIX}-control"; XE="${PREFIX}-execution"; EV="${PREFIX}-evidence"
 APPEND_TOKEN="$(openssl rand -hex 24)"
+EXEC_TOKEN="$(openssl rand -hex 24)"
+KEK="$(openssl rand -base64 32)"
 PRIMARY="postgres-primary.${CO}.svc:5432"
 EVIDB="postgres-evidence.${EV}.svc:5432"
 
@@ -25,12 +30,17 @@ kubectl -n "$CO" create secret generic control-secrets --dry-run=client -o yaml 
   --from-literal=DATABASE_URL="postgresql://vega:vega_local_dev_only@${PRIMARY}/vega" \
   --from-literal=DATABASE_APP_URL="postgresql://vega_app:vega_app_local_dev_only@${PRIMARY}/vega" \
   --from-literal=SESSION_SECRET="$(openssl rand -base64 48 | tr -d '\n')" \
-  --from-literal=LOCAL_KEK_BASE64="$(openssl rand -base64 32)" \
+  --from-literal=LOCAL_KEK_BASE64="$KEK" \
+  --from-literal=EXECUTION_INTERNAL_TOKEN="$EXEC_TOKEN" \
+  --from-literal=CONNECTOR_STATE_SECRET="$(openssl rand -base64 36 | tr -d '\n')" \
   --from-literal=OPENFGA_API_URL="http://openfga.${CO}.svc:8080" \
   --from-literal=VALKEY_URL="redis://valkey.${CO}.svc:6379" | kubectl apply -f - >/dev/null
 
 kubectl -n "$XE" create secret generic execution-secrets --dry-run=client -o yaml \
   --from-literal=EVIDENCE_APPEND_TOKEN="$APPEND_TOKEN" \
+  --from-literal=EXECUTION_INTERNAL_TOKEN="$EXEC_TOKEN" \
+  --from-literal=LOCAL_KEK_BASE64="$KEK" \
+  --from-literal=VALKEY_URL="redis://valkey.${CO}.svc:6379" \
   --from-literal=DATABASE_APP_URL="postgresql://vega_app:vega_app_local_dev_only@${PRIMARY}/vega" | kubectl apply -f - >/dev/null
 
 kubectl -n "$EV" create secret generic evidence-secrets --dry-run=client -o yaml \

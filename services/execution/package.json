@@ -16,6 +16,7 @@
   "dependencies": {
     "@vega/connector-mcp": "workspace:*",
     "@vega/connector-sdk": "workspace:*",
+    "@vega/connector-web": "workspace:*",
     "@vega/connectors": "workspace:*",
     "@vega/db": "workspace:*",
     "@vega/idp": "workspace:*",

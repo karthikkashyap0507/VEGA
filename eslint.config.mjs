@@ -11,6 +11,7 @@ export default tseslint.config(
       '**/.next/**',
       '**/.turbo/**',
       '**/coverage/**',
+      '.semgrep/fixtures/**',
       '**/next-env.d.ts',
       'test-results/**',
       'playwright-report/**',

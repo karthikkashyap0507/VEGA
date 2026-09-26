@@ -92,7 +92,7 @@ export const post = defineTool({
       fidelity: 'DERIVED',
       // Channel members may include guests from other organizations; M5 weighs the channel.
       externalRecipients: [],
-      recordsAffected: [{ system: 'slack', id: args.channel, field: 'message', after: { text: args.text.slice(0, 200) } }],
+      recordsAffected: [{ system: 'slack', id: `${args.channel}:(new message)`, field: 'message', after: { text: args.text.slice(0, 200) } }],
       reversibilityNote: 'Held before release. Deleting after release leaves a visible trace for anyone who saw it.',
       detail: { channel: args.channel, ts: null },
     };

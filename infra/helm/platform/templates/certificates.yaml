@@ -32,7 +32,7 @@ metadata:
 spec:
   ca:
     secretName: {{ .Values.prefix }}-plane-ca
-{{- range $wl := list (list "gateway" "control") (list "control" "control") (list "execution" "execution") (list "evidence" "evidence") }}
+{{- range $wl := list (list "gateway" "control") (list "control" "control") (list "execution" "execution") (list "web-fetch" "execution") (list "evidence" "evidence") }}
 {{- $name := index $wl 0 }}
 {{- $ns := printf "%s-%s" $.Values.prefix (index $wl 1) }}
 ---

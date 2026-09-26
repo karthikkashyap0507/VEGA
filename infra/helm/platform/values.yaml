@@ -20,7 +20,10 @@ image:
 # key, pinned OpenFGA ids and the Zitadel service account (see services/*/src/main.ts).
 environment: production
 
-replicas: { web: 1, gateway: 1, control: 1, execution: 1, evidence: 1 }
+replicas: { web: 1, gateway: 1, control: 1, execution: 1, evidence: 1, web-fetch: 1 }
+
+# SearXNG (web.search) — an operator-run service; empty disables search.
+search: { searxngUrl: "" }
 
 publicUrls:
   web: https://app.example.invalid
@@ -37,8 +40,9 @@ mtls:
 # Each lives ONLY in its own plane's namespace. There is deliberately no key for the evidence
 # database anywhere under `execution`.
 secrets:
-  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*
-  execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL
+  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*, EXECUTION_INTERNAL_TOKEN, CONNECTOR_STATE_SECRET, *_CLIENT_ID/SECRET
+  execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL, EXECUTION_INTERNAL_TOKEN, LOCAL_KEK_BASE64|KMS_*, VALKEY_URL, *_CLIENT_ID/SECRET
+  # web-fetch gets NO Secret at all (module2.md §10.3).
   evidence: evidence-secrets     # EVIDENCE_DATABASE_URL, EVIDENCE_WRITER_URL, EVIDENCE_APPEND_TOKEN
 
 externalSecrets:
@@ -57,6 +61,34 @@ network:
     evidenceDatabase: []  # evidence only
     identityProvider: []  # gateway + control (Zitadel)
     authorization: []     # control (OpenFGA), when external
+    cache: []             # execution (Valkey: connector rate limits), when external
+    # Module 2. FQDNs, resolved through Cilium's DNS proxy. Control exchanges and revokes
+    # OAuth grants; execution calls the data APIs and refreshes tokens.
+    oauthProviders: [oauth2.googleapis.com, login.microsoftonline.com, slack.com]
+    connectorApis:
+      - gmail.googleapis.com
+      - www.googleapis.com
+      - oauth2.googleapis.com
+      - graph.microsoft.com
+      - login.microsoftonline.com
+      - slack.com
+    mcpServers: []        # execution: CIDRs of attached MCP servers
+  # The isolated web fetcher's egress: everything public on 80/443, minus these ranges.
+  webFetch:
+    deniedRanges:
+      - 0.0.0.0/8
+      - 10.0.0.0/8
+      - 100.64.0.0/10
+      - 127.0.0.0/8
+      - 169.254.0.0/16   # link-local: cloud metadata (169.254.169.254)
+      - 172.16.0.0/12
+      - 192.0.0.0/24
+      - 192.168.0.0/16
+      - 198.18.0.0/15
+      - 224.0.0.0/4
+      - 240.0.0.0/4
+    ipv6: false
+    deniedRangesV6: ["::1/128", "fc00::/7", "fe80::/10", "::ffff:0:0/96", "64:ff9b::/96"]
 
 # In-cluster Postgres x2, OpenFGA and Valkey — for kind/k3s policy tests and local clusters
 # ONLY. Deployed environments use managed databases reached through `network.egress`.

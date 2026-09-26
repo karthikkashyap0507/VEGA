@@ -4,3 +4,5 @@ packages:
   - 'packages/*'
   # One package per connector (docs/module2.md §15), plus the SDK, provider fakes and the registry.
   - 'packages/connectors/*'
+  # Evaluation harnesses (docs/module2.md §11, module3/module6 evals).
+  - 'evals/*'
