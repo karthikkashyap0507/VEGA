@@ -4,6 +4,7 @@ import {
   EXECUTION_CAPABILITIES,
   ROLES,
   ROLE_CAPABILITIES,
+  canApproveAs,
   hasCapability,
   tenantRelationFor,
   tenantRoleTuples,
@@ -75,6 +76,27 @@ describe('role → tenant relation', () => {
       expect(current.relation).toBe(tenantRelationFor(role));
       expect(stale.map((s) => s.relation)).not.toContain(current.relation);
       expect(stale).toHaveLength(4);
+    }
+  });
+});
+
+describe('approver roles (module5.md §5.1 approver_role)', () => {
+  const table: Array<[string | null, string[]]> = [
+    [null, ['OWNER', 'ADMIN', 'APPROVER']],
+    ['APPROVER', ['OWNER', 'ADMIN', 'APPROVER']],
+    ['ADMIN', ['OWNER', 'ADMIN']],
+    ['OWNER', ['OWNER']],
+    ['REGISTERED_PRINCIPAL', ['OWNER', 'ADMIN']],
+  ];
+  it.each(table)('%s may be decided by exactly %j', (required, allowed) => {
+    expect(ROLES.filter((r) => canApproveAs(r, required))).toEqual(allowed);
+  });
+
+  it('a role that cannot execute never approves, whatever the policy names', () => {
+    for (const required of ['APPROVER', 'COMPLIANCE_OFFICER', 'AUDITOR', 'ADMIN']) {
+      expect(canApproveAs('COMPLIANCE_OFFICER', required)).toBe(false);
+      expect(canApproveAs('AUDITOR', required)).toBe(false);
+      expect(canApproveAs('MEMBER', required)).toBe(false);
     }
   });
 });

@@ -21,6 +21,7 @@ import { RunStore } from '@vega/runs';
 import { buildExecutionApp } from './app.js';
 import { EvidenceAppendClient } from './evidence-append.js';
 import { executionHooks, RUN_WORKFLOW, runWorkflow, type RunTokenCheck } from './executor/index.js';
+import { policyEngineFromEnv } from './policy/index.js';
 import { RuntimeDeclarations } from './programs.js';
 
 const logger = createLogger('execution');
@@ -110,6 +111,10 @@ if (!haveJwks && production) throw new Error(`run token JWKS not found at ${jwks
 if (!haveJwks) logger.warn({ jwksPath }, 'DEV: no run-token JWKS yet; it is read when the first run starts (control writes it)');
 if (!evidence && !production) logger.warn('UNGOVERNED DEV MODE: no evidence plane; action receipts go to platform_events only');
 
+// ---------------------------------------------------------------- policy engine (Module 5)
+// OPA (signed bundles) + Presidio + the risk function. It decides every step; it fails closed.
+const policy = policyEngineFromEnv(env, logger, production);
+
 const store = new RunStore();
 const declarations = new RuntimeDeclarations(registry, runtime);
 const orchestrator = dbosUrl ? new DbosOrchestrator({ appName: 'vega-execution', systemDatabaseUrl: dbosUrl, logLevel: env['DBOS_LOG_LEVEL'] ?? 'warn' }) : undefined;
@@ -123,7 +128,7 @@ if (orchestrator && internalToken) {
       declarations,
       extractor,
       entities: new PgEntities(),
-      hooks: executionHooks({ log: logger, invoker, evidence, requireEvidence: production }),
+      hooks: executionHooks({ log: logger, invoker, evidence, requireEvidence: production, policy: (ctx) => policy.decide(ctx) }),
       schemas: new SchemaRegistry(),
       recorder: () => new PgRecorder(),
       log: logger,
@@ -139,6 +144,7 @@ const app = await buildExecutionApp({
   ...(evidence ? { evidence } : {}),
   ...(internalToken ? { connectors: { runtime, mcpStore, token: internalToken }, programs: { runtime, registry, extractor, entities: new PgEntities(), pager } } : {}),
   ...(internalToken && orchestrator ? { runs: { orchestrator, store, token: internalToken, runTokens, log: logger } } : {}),
+  ...(internalToken ? { policy: { engine: policy, token: internalToken } } : {}),
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });
 const port = Number(env['EXECUTION_PORT'] ?? 3003);

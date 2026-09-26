@@ -63,6 +63,7 @@ export function runWorkflow(deps: ExecutorDeps) {
     const { tenantId, runId } = args;
     const memo = new Map<string, unknown>();
     const approvals = new Set<string>();
+    const released = new Set<string>();
 
     /** A status change is a step: recorded once, replayed rather than repeated. */
     const transition = (name: string, to: RunStatus, opts: Parameters<ExecutorDeps['store']['setStatus']>[3] = {}) =>
@@ -90,6 +91,7 @@ export function runWorkflow(deps: ExecutorDeps) {
       if (!run) return { status: 'FAILED', reason: 'run not found' };
       if (TERMINAL_RUN_STATUSES.has(run.status)) return { status: run.status };
       for (const a of run.checkpoint.approvals) approvals.add(a);
+      for (const k of run.checkpoint.released ?? []) released.add(k);
       const version = run.programVersion;
       const prog = await ctx.step(
         `program:v${version}:p${passNo}`,
@@ -122,7 +124,7 @@ export function runWorkflow(deps: ExecutorDeps) {
       const enter = await transition(`executing:${passNo}`, 'EXECUTING', { reason: null, pending: null });
       if (!enter.ok) return { status: enter.from };
 
-      const pass = new DurablePass({ ctx, deps, run, version, passNo, approvals, committed, memo });
+      const pass = new DurablePass({ ctx, deps, run, version, passNo, approvals, released, committed, memo });
       const result = await evaluate(
         { tools: pass, declarations: deps.declarations, extractor: pass.extractor, entities: pass.entities, recorder: pass.recorder, schemas: deps.schemas, ...(deps.pager ? { pager: deps.pager } : {}) },
         program,
@@ -147,10 +149,32 @@ export function runWorkflow(deps: ExecutorDeps) {
         let decision: DecisionMessage | null = null;
         // A decision names the exact call it approves (version, call, argument digest). Anything
         // else is stale — e.g. a double-click on an approval for an earlier plan — and ignored.
-        for (let i = 0; i < 20 && !decision; i++) {
+        // A dual approval (Module 5) needs two DISTINCT approvers, and under separation of duties
+        // neither may be the person the run acts for. The control plane refuses those first; this
+        // is the executor's own check, because the approval is what lets the action happen.
+        const required = pending.approvalsRequired ?? 1;
+        const sod = pending.policy?.separationOfDuties === true;
+        const approvers: string[] = [...(pending.approvedBy ?? [])];
+        for (let i = 0; i < 40 && !decision; i++) {
           const m = await ctx.recv<DecisionMessage>(TOPICS.decision, expirySeconds(run.spec.escalation.expiry));
           if (!m) break;
-          if (m.key === pending.key) decision = m;
+          if (m.key !== pending.key) continue;
+          if (m.decision === 'reject') {
+            decision = m;
+            break;
+          }
+          if (required > 1 && ((sod && m.by === run.principalUserId) || approvers.includes(m.by))) {
+            deps.log.warn({ run_id: runId, by: m.by }, 'ignored an approval: the same approver twice, or the requester under separation of duties');
+            continue;
+          }
+          approvers.push(m.by);
+          if (approvers.length >= required) {
+            decision = m;
+            break;
+          }
+          const partial = [...approvers];
+          const t2 = await transition(`approval:${passNo}:${partial.length}`, 'AWAITING_APPROVAL', { reason: `${partial.length} of ${required} approvals`, pending: { ...pending, approvedBy: partial } });
+          if (!t2.ok) return { status: t2.from };
         }
         if (!decision || decision.decision === 'reject') {
           if (pending.nodeRowId) {
@@ -170,11 +194,35 @@ export function runWorkflow(deps: ExecutorDeps) {
       }
 
       if (result.status === 'held' && suspension) {
-        const t = await transition(`held:${passNo}`, 'HELD', { reason: suspension.pending.reason, pending: suspension.pending });
+        const pending = suspension.pending;
+        const t = await transition(`held:${passNo}`, 'HELD', { reason: pending.reason, pending });
         if (!t.ok) return { status: t.from };
+        if (pending.kind === 'hold' && pending.key && pending.holdWindowMs) {
+          // A policy hold (ALLOW_WITH_HOLD): the window is a durable wait. It ends by itself —
+          // the action then runs — or early: `release` runs it now, `revoke` cancels it.
+          const key = pending.key;
+          const m = await ctx.recv<ResumeMessage>(TOPICS.resume, Math.ceil(pending.holdWindowMs / 1000));
+          if (m?.action === 'revoke') {
+            if (pending.nodeRowId) {
+              await ctx.step(`revoke:${passNo}`, () => deps.store.markNode(tenantId, runId, pending.nodeRowId!, { status: 'skipped', error: { code: 'REVOKED', by: m.by ?? null }, end: true }), { retries: 5 });
+            }
+            return end(`revoked:${passNo}`, 'CANCELLED', `revoked during its hold window (${pending.toolId ?? 'action'} never ran)`, { actorId: m.by ?? null });
+          }
+          released.add(key);
+          await ctx.step(`released:${passNo}`, () => deps.store.updateCheckpoint(tenantId, runId, (cp) => ({ ...cp, released: [...new Set([...(cp.released ?? []), key])] })), { retries: 5 });
+          deps.log.info({ run_id: runId, key, by: m?.by ?? null, early: Boolean(m) }, m ? 'hold released early' : 'hold window passed; releasing');
+          continue;
+        }
         const m = await ctx.recv<ResumeMessage>(TOPICS.resume, 7 * DAY);
         if (!m) return end(`heldexpired:${passNo}`, 'FAILED', 'held for 7 days without release');
         if (m.action === 'revoke') return end(`revoked:${passNo}`, 'CANCELLED', 'revoked while held', { actorId: m.by ?? null });
+        // A policy HOLD without a window runs once someone releases it; a credential hold simply
+        // resumes (the next pass checks the fresh grant).
+        if (pending.kind === 'hold' && pending.key) {
+          const key = pending.key;
+          released.add(key);
+          await ctx.step(`released:${passNo}`, () => deps.store.updateCheckpoint(tenantId, runId, (cp) => ({ ...cp, released: [...new Set([...(cp.released ?? []), key])] })), { retries: 5 });
+        }
         continue;
       }
 

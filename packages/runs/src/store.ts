@@ -25,6 +25,8 @@ export interface RunCheckpoint {
   bindings: Record<string, string>;
   /** Approval keys `v<version>:<callSeq>:<argsDigest>`: an approval covers exactly what was shown. */
   approvals: string[];
+  /** Hold keys (same shape) whose hold window passed or that someone released early (Module 5). */
+  released?: string[] | undefined;
   /** Verified claims of the latest run token (never the token itself). */
   grant?: Grant | undefined;
   answers?: Array<{ field: string; choice: string; by: string; at: string }> | undefined;

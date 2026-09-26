@@ -83,6 +83,7 @@ export interface ExecutorDeps {
 
 export type StopReason =
   | 'policy_denial'
+  | 'policy_unavailable'
   | 'verify_failure'
   | 'unknown_outcome'
   | 'not_allowed'
@@ -109,6 +110,13 @@ export interface PendingAction {
   egressClass?: string;
   effect?: { summary: string; externalRecipients: string[]; recordsAffected: unknown[]; fidelity: string } | undefined;
   policy?: PolicyDecision;
+  /** REQUIRE_DUAL_APPROVAL: 2. Who has approved so far (distinct users; never the requester under SoD). */
+  approvalsRequired?: number;
+  approvedBy?: string[];
+  /** A windowed hold: it releases itself at `releaseAt` unless revoked first. */
+  holdWindowMs?: number;
+  heldAt?: string;
+  releaseAt?: string;
   assumptions?: string[];
   ambiguity?: Ambiguity;
   connector?: string;
@@ -146,6 +154,8 @@ export interface PassConfig {
   version: number;
   passNo: number;
   approvals: ReadonlySet<string>;
+  /** Hold keys whose window has passed (or that someone released early): they run now. */
+  released: ReadonlySet<string>;
   /** Non-read calls committed by EARLIER program versions: facts, never redone (§5.5). */
   committed: readonly CommittedFact[];
   memo: Map<string, unknown>;
@@ -320,7 +330,7 @@ export class DurablePass implements ToolPort {
     }
   }
 
-  private stepContext(inv: ToolInvocation, decl: ToolDeclarationRecord, seq: number): StepContext {
+  private stepContext(inv: ToolInvocation, decl: ToolDeclarationRecord, seq: number, nodeRowId: string): StepContext {
     const { run, version } = this.cfg;
     return {
       tenantId: run.tenantId,
@@ -328,6 +338,8 @@ export class DurablePass implements ToolPort {
       programVersion: version,
       nodeId: inv.nodeId,
       callSeq: seq,
+      nodeRowId,
+      trigger: run.trigger,
       toolId: inv.toolId,
       tool: decl,
       args: inv.args,
@@ -349,7 +361,7 @@ export class DurablePass implements ToolPort {
   }
 
   private async chain(row: JournalRow, inv: ToolInvocation, decl: ToolDeclarationRecord, seq: number, d: string, assumptions: string[]): Promise<CallOutcome> {
-    const { run, version, deps, approvals, committed } = this.cfg;
+    const { run, version, deps, approvals, released, committed } = this.cfg;
     const store = deps.store;
     const mark = (patch: Parameters<RunStore['markNode']>[3]) => store.markNode(run.tenantId, run.id, row.id, patch);
 
@@ -377,7 +389,7 @@ export class DurablePass implements ToolPort {
       }
     }
 
-    const sctx = this.stepContext(inv, decl, seq);
+    const sctx = this.stepContext(inv, decl, seq, row.id);
     const hooks = deps.hooks;
     const base: PendingAction = {
       kind: 'approval',
@@ -395,31 +407,60 @@ export class DurablePass implements ToolPort {
       ...(assumptions.length ? { assumptions } : {}),
     };
 
-    // 1 — policy (M5)
+    // 1 — policy (M5). A DENY ends the call here; a fail-closed DENY (the engine could not
+    // decide) ends the RUN — replanning around an outage would only meet it again.
     const policy = await hooks.policy(sctx);
     if (policy.decision === 'DENY') {
-      await mark({ status: 'failed', error: { code: 'POLICY_DENIED', message: policy.reason ?? 'denied by policy' }, end: true });
+      const code = policy.failClosed ? 'POLICY_UNAVAILABLE' : 'POLICY_DENIED';
+      await mark({ status: 'failed', error: { code, message: policy.reason ?? 'denied by policy', ...(policy.evaluationId ? { evaluationId: policy.evaluationId } : {}) }, end: true });
+      if (policy.failClosed) return { kind: 'stop', reason: 'policy_unavailable', message: `the policy engine could not decide on ${inv.toolId}; denied (fail closed): ${policy.reason ?? ''}` };
       return { kind: 'stop', reason: 'policy_denial', message: `policy denied ${inv.toolId}${policy.reason ? `: ${policy.reason}` : ''}` };
     }
     // 2 — simulate (M6)
     const sim: SimulationResult = await hooks.simulate(sctx);
     const effect = sim.ok ? { summary: sim.effect.summary, externalRecipients: sim.effect.externalRecipients, recordsAffected: sim.effect.recordsAffected, fidelity: sim.effect.fidelity } : undefined;
-    if (policy.decision === 'HOLD') {
+    const key = `v${version}:${seq}:${d}`;
+    if (policy.decision === 'HOLD' && !released.has(key)) {
       await mark({ status: 'held', effect });
-      return { kind: 'suspend', status: 'held', pending: { ...base, kind: 'hold', reason: policy.reason ?? 'held by policy', policy, effect } };
+      return { kind: 'suspend', status: 'held', pending: { ...base, kind: 'hold', key, reason: policy.reason ?? 'held by policy', policy, effect } };
     }
     // 3 — approval (M8). The gate's REQUIRE_APPROVAL (untrusted content leaving the org) is
     // folded in, and honoured below even if an approval hook were to say PROCEED.
-    const key = `v${version}:${seq}:${d}`;
+    const needs = (p: PolicyDecision) => p.decision === 'REQUIRE_APPROVAL' || p.decision === 'REQUIRE_DUAL_APPROVAL';
     const merged: PolicyDecision =
-      inv.gate!.decision === 'REQUIRE_APPROVAL' && policy.decision !== 'REQUIRE_APPROVAL' ? { ...policy, decision: 'REQUIRE_APPROVAL', reason: inv.gate!.reason ?? 'untrusted content influences this action' } : policy;
+      inv.gate!.decision === 'REQUIRE_APPROVAL' && !needs(policy)
+        ? { ...policy, decision: 'REQUIRE_APPROVAL', reason: inv.gate!.reason ?? 'untrusted content influences this action', approverRole: policy.approverRole ?? null }
+        : policy;
     const approved = approvals.has(key);
     const approval = await hooks.approval(sctx, sim, merged, approved);
-    if (approval.decision === 'WAIT' || (merged.decision === 'REQUIRE_APPROVAL' && !approved)) {
+    if (approval.decision === 'WAIT' || (needs(merged) && !approved)) {
       if (approval.decision !== 'WAIT') deps.log.error({ run_id: run.id, tool_id: inv.toolId }, 'approval hook returned PROCEED for a call that requires approval; holding it anyway');
       await mark({ status: 'approving', effect });
       const reason = approval.decision === 'WAIT' ? approval.reason : (merged.reason ?? 'approval required');
-      return { kind: 'suspend', status: 'awaiting_approval', pending: { ...base, kind: 'approval', key, reason, policy: merged, effect } };
+      const approvalsRequired = merged.decision === 'REQUIRE_DUAL_APPROVAL' ? 2 : 1;
+      return { kind: 'suspend', status: 'awaiting_approval', pending: { ...base, kind: 'approval', key, reason, policy: merged, effect, approvalsRequired, approvedBy: [] } };
+    }
+    // 3b — the hold window (M5 ALLOW_WITH_HOLD, or a policy's hold after approval). The action
+    // waits, revocable, and then runs by itself: `released` says its window has passed.
+    const holdMs = merged.decision === 'ALLOW_WITH_HOLD' || needs(merged) ? (merged.holdWindowMs ?? null) : null;
+    if (holdMs && holdMs > 0 && !released.has(key)) {
+      await mark({ status: 'held', effect });
+      const heldAt = (deps.now ?? Date.now)();
+      return {
+        kind: 'suspend',
+        status: 'held',
+        pending: {
+          ...base,
+          kind: 'hold',
+          key,
+          reason: merged.reason ?? 'held by policy',
+          policy: merged,
+          effect,
+          holdWindowMs: holdMs,
+          heldAt: new Date(heldAt).toISOString(),
+          releaseAt: new Date(heldAt + holdMs).toISOString(),
+        },
+      };
     }
     // 4 — receipt BEFORE the side effect (invariant 2). No receipt, no call.
     try {
@@ -446,7 +487,7 @@ export class DurablePass implements ToolPort {
   /** A row left `running` by a process that died mid-call. */
   private async recover(row: JournalRow, inv: ToolInvocation, decl: ToolDeclarationRecord, seq: number, d: string, _assumptions: string[]): Promise<CallOutcome> {
     const { run, deps } = this.cfg;
-    const sctx = this.stepContext(inv, decl, seq);
+    const sctx = this.stepContext(inv, decl, seq, row.id);
     if (decl.reversibility === READ || decl.idempotency === 'KEYED' || decl.idempotency === 'NATIVE') {
       deps.log.warn({ run_id: run.id, tool_id: inv.toolId, call_seq: seq }, 'recovering a call that was in flight when the executor stopped');
       return this.call(row, inv, decl, sctx, d);

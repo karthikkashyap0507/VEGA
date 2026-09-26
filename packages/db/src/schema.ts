@@ -510,6 +510,121 @@ export const webhookDeliveries = pgTable('webhook_deliveries', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ------------------------------------------------------------------ Module 5 (0008_policy)
+
+export const policies = pgTable('policies', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  key: text('key').notNull(),
+  version: integer('version').notNull(),
+  specYaml: text('spec_yaml').notNull(),
+  compiledRego: text('compiled_rego').notNull(),
+  citation: text('citation'),
+  description: text('description').notNull(),
+  severity: text('severity').notNull().default('normal'),
+  decision: text('decision').notNull(),
+  authorId: uuid('author_id').notNull(),
+  activeFrom: timestamp('active_from', { withTimezone: true }),
+  activeTo: timestamp('active_to', { withTimezone: true }),
+  state: text('state').notNull().default('draft'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const policyBundles = pgTable('policy_bundles', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  version: integer('version').notNull(),
+  policyIds: uuid('policy_ids').array().notNull(),
+  policyVersions: jsonb('policy_versions').notNull(),
+  rego: text('rego').notNull(),
+  revision: text('revision').notNull(),
+  bundleRef: text('bundle_ref').notNull(),
+  digest: text('digest').notNull(),
+  signature: text('signature').notNull(),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  activatedAt: timestamp('activated_at', { withTimezone: true }),
+  activatedBy: uuid('activated_by'),
+  supersededAt: timestamp('superseded_at', { withTimezone: true }),
+});
+
+export const riskWeights = pgTable('risk_weights', {
+  version: integer('version').primaryKey(),
+  tenantId: uuid('tenant_id'),
+  weights: jsonb('weights').notNull(),
+  boundaries: jsonb('boundaries').notNull(),
+  activeFrom: timestamp('active_from', { withTimezone: true }).notNull().defaultNow(),
+  authorId: uuid('author_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const riskEvaluations = pgTable('risk_evaluations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id'),
+  actionId: uuid('action_id'),
+  nodeId: uuid('node_id'),
+  score: integer('score').notNull(),
+  tier: text('tier').notNull(),
+  weightsVersion: integer('weights_version').notNull(),
+  inputJson: jsonb('input_json').notNull(),
+  factorsJson: jsonb('factors_json').notNull(),
+  explanationJson: jsonb('explanation_json').notNull(),
+  hardGate: text('hard_gate'),
+  hardGates: text('hard_gates').array().notNull().default([]),
+  evaluatedAt: timestamp('evaluated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const policyEvaluations = pgTable('policy_evaluations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  actionId: uuid('action_id'),
+  nodeId: uuid('node_id').notNull(),
+  dslNodeId: text('dsl_node_id'),
+  toolId: text('tool_id').notNull(),
+  bundleVersion: integer('bundle_version').notNull().default(0),
+  bundleRevision: text('bundle_revision'),
+  preset: text('preset').notNull(),
+  policyKey: text('policy_key').notNull(),
+  policyVersion: integer('policy_version').notNull().default(0),
+  decision: text('decision').notNull(),
+  approverRole: text('approver_role'),
+  holdWindowMs: integer('hold_window_ms'),
+  reasonJson: jsonb('reason_json').notNull(),
+  inputJson: jsonb('input_json').notNull(),
+  matchesJson: jsonb('matches_json').notNull(),
+  riskEvaluationId: uuid('risk_evaluation_id'),
+  failClosed: boolean('fail_closed').notNull().default(false),
+  latencyMs: integer('latency_ms'),
+  evaluatedAt: timestamp('evaluated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const classifications = pgTable('classifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  contentDigest: text('content_digest').notNull(),
+  entities: jsonb('entities').notNull(),
+  sensitivity: integer('sensitivity').notNull(),
+  labels: text('labels').array().notNull(),
+  classifier: text('classifier').notNull(),
+  classifiedAt: timestamp('classified_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const policySimulations = pgTable('policy_simulations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  bundleId: uuid('bundle_id').notNull(),
+  baselineBundleId: uuid('baseline_bundle_id'),
+  windowFrom: timestamp('window_from', { withTimezone: true }).notNull(),
+  windowTo: timestamp('window_to', { withTimezone: true }).notNull(),
+  actionsReplayed: integer('actions_replayed').notNull(),
+  summaryJson: jsonb('summary_json').notNull(),
+  changesJson: jsonb('changes_json').notNull(),
+  runBy: uuid('run_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -539,6 +654,13 @@ export const TENANT_SCOPED_TABLES = [
   'trigger_fires',
   'webhook_endpoints',
   'webhook_deliveries',
+  'policies',
+  'policy_bundles',
+  'policy_evaluations',
+  'risk_evaluations',
+  'risk_weights',
+  'classifications',
+  'policy_simulations',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

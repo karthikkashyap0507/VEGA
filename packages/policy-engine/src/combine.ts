@@ -46,6 +46,12 @@ export interface CombinedDecision {
   riskScore: number;
   matched: Match[];
   chain: ChainStep[];
+  /**
+   * The rule that decided: a policy (its id and version), or `(hard-gate:<GATE>)`,
+   * `(tier-default:<TIER>)`, `(fail-closed)` with version 0. When several tie on
+   * restrictiveness, the first in chain order (gates, then policies by severity, then the tier).
+   */
+  decidedBy: { key: string; version: number };
   /** The engine could not decide (OPA down, classification failed): DENY, loudly. */
   failClosed?: boolean;
 }
@@ -56,6 +62,7 @@ interface Candidate {
   holdWindowMs?: number | null;
   separationOfDuties?: boolean;
   source: string;
+  ref: { key: string; version: number };
 }
 
 const GATE_TEXT: Record<HardGate, string> = {
@@ -65,7 +72,7 @@ const GATE_TEXT: Record<HardGate, string> = {
   RESTRICTED_RESOURCE: 'a RESTRICTED resource: two approvers at least',
 };
 
-const GATE_DECISION: Partial<Record<HardGate, Candidate>> = {
+const GATE_DECISION: Partial<Record<HardGate, Omit<Candidate, 'ref'>>> = {
   UNTRUSTED_RECIPIENT: { decision: 'DENY', source: 'hard gate' },
   OUT_OF_SCOPE: { decision: 'DENY', source: 'hard gate' },
   RESTRICTED_RESOURCE: { decision: 'REQUIRE_DUAL_APPROVAL', approverRole: 'ADMIN', separationOfDuties: true, source: 'hard gate' },
@@ -97,7 +104,7 @@ export function combine(risk: RiskResult, matches: Match[]): CombinedDecision {
   for (const g of risk.hardGates) {
     chain.push({ step: 'gate', id: g, detail: GATE_TEXT[g] });
     const c = GATE_DECISION[g];
-    if (c) candidates.push(c);
+    if (c) candidates.push({ ...c, ref: { key: `(hard-gate:${g})`, version: 0 } });
   }
   // Most severe first: when two match at the same level, the more severe one's attributes lead.
   const SEV = { critical: 0, high: 1, normal: 2, low: 3 } as Record<string, number>;
@@ -110,12 +117,12 @@ export function combine(risk: RiskResult, matches: Match[]): CombinedDecision {
       ...(m.citation ? { citation: m.citation } : {}),
       detail: `${m.id}${m.citation ? ` (${m.citation})` : ''} → ${PLAIN[m.decision]}${m.approver_role ? ` by ${m.approver_role}` : ''}${m.hold_window_ms ? `, ${minutes(m.hold_window_ms)} hold` : ''}${m.reason ? `: ${m.reason}` : ''}`,
     });
-    candidates.push({ decision: m.decision, approverRole: m.approver_role, holdWindowMs: m.hold_window_ms, separationOfDuties: m.separation_of_duties, source: `policy ${m.id}` });
+    candidates.push({ decision: m.decision, approverRole: m.approver_role, holdWindowMs: m.hold_window_ms, separationOfDuties: m.separation_of_duties, source: `policy ${m.id}`, ref: { key: m.id, version: m.version } });
   }
   const tierBinds = matches.length === 0 || risk.tier === 'HIGH' || risk.tier === 'CRITICAL';
   const td = TIER_DEFAULT[risk.tier];
   if (tierBinds) {
-    candidates.push({ decision: td.decision, approverRole: td.approverRole ?? null, holdWindowMs: td.holdWindowMs ?? null, source: `the ${risk.tier} tier default` });
+    candidates.push({ decision: td.decision, approverRole: td.approverRole ?? null, holdWindowMs: td.holdWindowMs ?? null, source: `the ${risk.tier} tier default`, ref: { key: `(tier-default:${risk.tier})`, version: 0 } });
     chain.push({ step: 'tier', detail: `${risk.tier} → ${PLAIN[td.decision]}${matches.length ? ' (applies at HIGH and above whatever policies match)' : ' (no policy matched)'}` });
   }
 
@@ -149,6 +156,7 @@ export function combine(risk: RiskResult, matches: Match[]): CombinedDecision {
     riskScore: risk.score,
     matched: ordered,
     chain,
+    decidedBy: winners[0]!.ref,
   };
 }
 
@@ -164,6 +172,7 @@ export function failClosed(reason: string, risk?: RiskResult): CombinedDecision 
     riskScore: risk?.score ?? 100,
     matched: [],
     chain: [{ step: 'engine', detail: `the policy engine could not decide (${reason}): denied — the engine never fails open` }],
+    decidedBy: { key: '(fail-closed)', version: 0 },
     failClosed: true,
   };
 }

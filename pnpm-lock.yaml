@@ -931,12 +931,21 @@ importers:
       '@vega/orchestration':
         specifier: workspace:*
         version: link:../../packages/orchestration
+      '@vega/policy-engine':
+        specifier: workspace:*
+        version: link:../../packages/policy-engine
+      '@vega/risk':
+        specifier: workspace:*
+        version: link:../../packages/risk
       '@vega/runs':
         specifier: workspace:*
         version: link:../../packages/runs
       '@vega/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
       fastify:
         specifier: ^5.12.5
         version: 5.12.5

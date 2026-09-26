@@ -40,15 +40,25 @@ export class OpaClient {
    * loaded): an activated tenant bundle that OPA has not loaded is an outage, not "no policies".
    */
   async matches(pkg: string, input: PolicyInput, opts: { require?: boolean } = {}): Promise<Match[]> {
-    const res = await this.call(`/v1/data/${pkg.replace(/\./g, '/')}/matches`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input }) });
+    return (await this.query(pkg, input, opts)).matches;
+  }
+
+  /**
+   * As `matches`, plus OPA's provenance: the revision of every loaded bundle AT THE MOMENT it
+   * answered. An evaluation records the bundle that actually decided, not the one the database
+   * says should be active (they differ for the seconds OPA takes to poll a new activation).
+   */
+  async query(pkg: string, input: PolicyInput, opts: { require?: boolean } = {}): Promise<{ matches: Match[]; bundles: Record<string, string> }> {
+    const res = await this.call(`/v1/data/${pkg.replace(/\./g, '/')}/matches?provenance=true`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input }) });
     if (res.status !== 200) throw new OpaUnavailable(`OPA answered ${res.status} for ${pkg}`);
-    const body = (await res.json()) as { result?: unknown };
+    const body = (await res.json()) as { result?: unknown; provenance?: { bundles?: Record<string, { revision?: string }> } };
+    const bundles = Object.fromEntries(Object.entries(body.provenance?.bundles ?? {}).map(([k, v]) => [k, v.revision ?? '']));
     if (body.result === undefined) {
       if (opts.require) throw new OpaUnavailable(`policy package ${pkg} is not loaded`);
-      return [];
+      return { matches: [], bundles };
     }
     if (!Array.isArray(body.result)) throw new OpaUnavailable(`unexpected result for ${pkg}`);
-    return (body.result as Match[]).sort((a, b) => a.id.localeCompare(b.id));
+    return { matches: (body.result as Match[]).sort((a, b) => a.id.localeCompare(b.id)), bundles };
   }
 
   /** Readiness: OPA up AND every configured bundle activated. */

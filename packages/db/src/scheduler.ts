@@ -28,3 +28,9 @@ export async function schedWebhookTenants(): Promise<string[]> {
   const { rows } = await getAppPool().query<{ tenant_id: string }>('SELECT * FROM sched_webhook_tenants()');
   return rows.map((r) => r.tenant_id);
 }
+
+/** Every tenant's active policy bundle (Module 5): what the signed OPA discovery bundle lists. */
+export async function schedPolicyBundles(): Promise<Array<{ tenantId: string; version: number; bundleRef: string }>> {
+  const { rows } = await getAppPool().query<{ tenant_id: string; version: number; bundle_ref: string }>('SELECT * FROM sched_policy_bundles()');
+  return rows.map((r) => ({ tenantId: r.tenant_id, version: r.version, bundleRef: r.bundle_ref }));
+}

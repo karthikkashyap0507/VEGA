@@ -7,7 +7,7 @@ import type { AgentSpec, Objective } from '@vega/contracts';
 import { parse } from '@vega/dsl';
 import { RunTokenIssuer, RunTokenVerifier } from '@vega/idp';
 import { PgEntities, PgRecorder, programDigest, SchemaRegistry, type ExtractorPort } from '@vega/interpreter';
-import { type HOOK_ORDER, type Hooks } from '@vega/orchestration';
+import { type HOOK_ORDER, type Hooks, type PolicyDecision, type StepContext } from '@vega/orchestration';
 import { RunStore } from '@vega/runs';
 import { RuntimeDeclarations } from '../src/programs.js';
 import { executionHooks, type ExecutorDeps, type ExecutorLog, type ToolInvoker } from '../src/executor/index.js';
@@ -152,7 +152,17 @@ export interface ExecutorKit {
   onExecute?: ((i: { runId: string; nodeId: string; toolId: string }) => Promise<void> | void) | undefined;
 }
 
-export async function executorKit(fetchImpl: typeof fetch, opts: { extractor?: ExtractorPort; hooks?: (h: Hooks) => Hooks } = {}): Promise<ExecutorKit> {
+/**
+ * A TEST DOUBLE for the policy hook, named for what it is. The Module 4 suites exercise the
+ * executor (journal, hook order, crash windows), not policy; the real engine is exercised by
+ * test/policy.test.ts and the cross-plane suites. Production has no permissive policy at all.
+ */
+export const allowAllPolicyForExecutorTests = async (): Promise<PolicyDecision> => ({ decision: 'ALLOW', reason: 'test double: executor suite, not the policy engine' });
+
+export async function executorKit(
+  fetchImpl: typeof fetch,
+  opts: { extractor?: ExtractorPort; hooks?: (h: Hooks) => Hooks; policy?: (ctx: StepContext) => Promise<PolicyDecision> } = {},
+): Promise<ExecutorKit> {
   const runtime = runtimeFor(fetchImpl);
   const registry = launchRegistry();
   const store = new RunStore();
@@ -168,7 +178,7 @@ export async function executorKit(fetchImpl: typeof fetch, opts: { extractor?: E
     },
     simulate: (i) => runtime.simulate(i),
   };
-  const base = executionHooks({ log: silent, invoker, requireEvidence: false });
+  const base = executionHooks({ log: silent, invoker, requireEvidence: false, policy: opts.policy ?? allowAllPolicyForExecutorTests });
   kit.deps = {
     store,
     invoker,

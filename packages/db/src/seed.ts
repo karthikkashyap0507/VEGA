@@ -172,6 +172,41 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
       );
       await client.query(`INSERT INTO webhook_deliveries (tenant_id, endpoint_id, event_id, kind) VALUES ($1, $2, 1, 'run.completed')`, [tenantId, hook.rows[0]!.id]);
 
+      // Module 5: one of everything the policy layer writes.
+      const pol = await client.query<{ id: string }>(
+        `INSERT INTO policies (tenant_id, key, version, spec_yaml, compiled_rego, description, decision, author_id)
+         VALUES ($1, 'seed-policy', 1, 'id: seed-policy', '# seed', 'seed', 'ALLOW', $2)
+         ON CONFLICT (tenant_id, key, version) DO UPDATE SET description = EXCLUDED.description RETURNING id`,
+        [tenantId, userId],
+      );
+      const bundle = await client.query<{ id: string }>(
+        `INSERT INTO policy_bundles (tenant_id, version, policy_ids, policy_versions, rego, revision, bundle_ref, digest, signature, created_by)
+         VALUES ($1, 1, ARRAY[$2::uuid], '[]', '# seed', 'seed@v1', 'seed/bundle.tar.gz', 'sha256:seed', 'seed', $3)
+         ON CONFLICT (tenant_id, version) DO UPDATE SET revision = EXCLUDED.revision RETURNING id`,
+        [tenantId, pol.rows[0]!.id, userId],
+      );
+      await client.query(`INSERT INTO risk_weights (tenant_id, weights, boundaries, author_id) VALUES ($1, '{}', '{}', $2)`, [tenantId, userId]);
+      const risk = await client.query<{ id: string }>(
+        `INSERT INTO risk_evaluations (tenant_id, run_id, node_id, score, tier, weights_version, input_json, factors_json, explanation_json)
+         VALUES ($1, $2, $3, 10, 'LOW', 1, '{}', '{}', '[]') RETURNING id`,
+        [tenantId, run.rows[0]!.id, node.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO policy_evaluations (tenant_id, run_id, node_id, tool_id, preset, policy_key, decision, reason_json, input_json, matches_json, risk_evaluation_id)
+         VALUES ($1, $2, $3, 'gmail.search', 'balanced', '(tier-default)', 'ALLOW', '[]', '{}', '[]', $4)`,
+        [tenantId, run.rows[0]!.id, node.rows[0]!.id, risk.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO classifications (tenant_id, content_digest, entities, sensitivity, labels, classifier)
+         VALUES ($1, 'sha256:' || encode(sha256(gen_random_uuid()::text::bytea), 'hex'), '[]', 0, '{}', 'seed')`,
+        [tenantId],
+      );
+      await client.query(
+        `INSERT INTO policy_simulations (tenant_id, bundle_id, window_from, window_to, actions_replayed, summary_json, changes_json, run_by)
+         VALUES ($1, $2, now() - interval '90 days', now(), 0, '{}', '[]', $3)`,
+        [tenantId, bundle.rows[0]!.id, userId],
+      );
+
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;
       made['workspace' + key] = workspaceId;

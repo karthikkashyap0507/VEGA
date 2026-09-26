@@ -116,6 +116,23 @@ export function hasCapability(role: Role, capability: Capability): boolean {
   return ROLE_CAPABILITIES[role]?.has(capability) ?? false;
 }
 
+/**
+ * May a user holding `role` decide an approval that a policy routed to `required` (module5.md
+ * §5.1 `approver_role`)? Deciding always needs `approvals.decide` (roles that "cannot execute"
+ * never approve). Then:
+ *   APPROVER → any role that decides approvals
+ *   ADMIN    → ADMIN or OWNER
+ *   OWNER    → OWNER
+ *   anything else (a policy may name a role the tenant does not have yet, such as
+ *   REGISTERED_PRINCIPAL) → ADMIN or OWNER until approval routing (Module 8) maps it.
+ */
+export function canApproveAs(role: Role, required: string | null | undefined): boolean {
+  if (!hasCapability(role, 'approvals.decide')) return false;
+  if (!required || required === 'APPROVER') return true;
+  if (required === 'OWNER') return role === 'OWNER';
+  return role === 'OWNER' || role === 'ADMIN';
+}
+
 /** The tenant relation a role maps to in OpenFGA. Exactly one per role. */
 export function tenantRelationFor(role: Role): 'owner' | 'admin' | 'compliance' | 'auditor' | 'member' {
   switch (role) {

@@ -30,6 +30,13 @@ import { createHarness, problemOf, type Harness } from './harness.js';
 
 vi.setConfig({ testTimeout: 40_000 });
 
+/**
+ * A TEST DOUBLE for the policy hook: this suite is Module 4's (C1 → C2 → executor across the
+ * planes). The real engine is exercised by services/execution/test/policy.test.ts and
+ * services/control/test/policies.test.ts.
+ */
+const allowAllPolicyForM4Tests = async () => ({ decision: 'ALLOW' as const, reason: 'test double: Module 4 suite' });
+
 const EXEC_TOKEN = 'runs-test-execution-token-0123456789';
 const SYSTEM_DB = 'vega_dbos_control_test';
 const OWNER_URL = process.env['DATABASE_URL'] ?? 'postgresql://vega:vega_local_dev_only@localhost:5432/vega';
@@ -94,7 +101,7 @@ beforeAll(async () => {
   orchestrator = new DbosOrchestrator({ appName: 'vega-control-test', systemDatabaseUrl: `${OWNER_URL.replace(/\/[^/]+$/, '')}/${SYSTEM_DB}`, logLevel: 'error' });
   orchestrator.register(
     RUN_WORKFLOW,
-    runWorkflow({ store, invoker, declarations: new RuntimeDeclarations(registry, runtime), extractor, entities: new PgEntities(), hooks: executionHooks({ log: silent, invoker, requireEvidence: false }), schemas: new SchemaRegistry(), recorder: () => new PgRecorder(), log: silent, requireGrant: true }),
+    runWorkflow({ store, invoker, declarations: new RuntimeDeclarations(registry, runtime), extractor, entities: new PgEntities(), hooks: executionHooks({ log: silent, invoker, requireEvidence: false, policy: allowAllPolicyForM4Tests }), schemas: new SchemaRegistry(), recorder: () => new PgRecorder(), log: silent, requireGrant: true }),
   );
   await orchestrator.launch();
   const execution = await buildExecutionApp({

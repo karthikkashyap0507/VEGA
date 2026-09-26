@@ -18,8 +18,13 @@ import { seed, type SeedResult } from '../src/seed.js';
 const SYSTEM_URL = process.env['DATABASE_URL'] ?? 'postgresql://vega:vega_local_dev_only@localhost:5432/vega';
 const APP_URL = process.env['DATABASE_APP_URL'] ?? 'postgresql://vega_app:vega_app_local_dev_only@localhost:5432/vega';
 
-/** (table, column holding the row's own id, column holding the tenant) */
-const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: string }> = [
+/**
+ * (table, column holding the row's own id, column holding the tenant). `appendOnly` tables are
+ * records nobody rewrites: the application role holds no UPDATE/DELETE grant at all, which is
+ * asserted as a refusal (stronger than "zero rows"). `shared` names rows every tenant may READ
+ * (platform defaults, tenant_id NULL) — never write.
+ */
+const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: string; appendOnly?: boolean; shared?: string }> = [
   { table: 'tenants', idColumn: 'id', tenantColumn: 'id' },
   { table: 'users', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'workspaces', idColumn: 'id', tenantColumn: 'tenant_id' },
@@ -48,6 +53,13 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'trigger_fires', idColumn: 'agent_id', tenantColumn: 'tenant_id' },
   { table: 'webhook_endpoints', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'webhook_deliveries', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'policies', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'policy_bundles', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'policy_simulations', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'classifications', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'policy_evaluations', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'risk_evaluations', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'risk_weights', idColumn: 'version', tenantColumn: 'tenant_id', appendOnly: true, shared: 'tenant_id IS NULL' },
 ];
 
 let appPool: pg.Pool;
@@ -133,7 +145,7 @@ describe('preconditions', () => {
   });
 });
 
-describe.each(TENANT_TABLES)('$table — cross-tenant access', ({ table, idColumn, tenantColumn }) => {
+describe.each(TENANT_TABLES)('$table — cross-tenant access', ({ table, idColumn, tenantColumn, appendOnly, shared }) => {
   it('SELECT by primary key returns nothing', async () => {
     const victims = await idsOf(table, idColumn, tenantColumn, ids.tenantB);
     await asTenant(ids.tenantA, async (c) => {
@@ -149,11 +161,12 @@ describe.each(TENANT_TABLES)('$table — cross-tenant access', ({ table, idColum
 
   it('an unqualified SELECT returns only this tenant', async () => {
     const mine = await idsOf(table, idColumn, tenantColumn, ids.tenantA);
+    const common = shared ? (await systemPool.query<{ id: string }>(`SELECT ${idColumn}::text AS id FROM ${table} WHERE ${shared}`)).rows.map((r) => r.id) : [];
     await asTenant(ids.tenantA, async (c) => {
       const { rows } = await c.query<{ id: string }>(
         `SELECT ${idColumn}::text AS id FROM ${table}`,
       );
-      expect(new Set(rows.map((r) => r.id))).toEqual(new Set(mine));
+      expect(new Set(rows.map((r) => r.id))).toEqual(new Set([...mine, ...common]));
     });
   });
 
@@ -161,11 +174,15 @@ describe.each(TENANT_TABLES)('$table — cross-tenant access', ({ table, idColum
     const victims = await idsOf(table, idColumn, tenantColumn, ids.tenantB);
     await asTenant(ids.tenantA, async (c) => {
       for (const victim of victims) {
-        const res = await c.query(
+        const update = c.query(
           `UPDATE ${table} SET ${tenantColumn} = ${tenantColumn} WHERE ${idColumn}::text = $1`,
           [victim],
         );
-        expect(res.rowCount, `${table}: updated foreign row ${victim}`).toBe(0);
+        if (appendOnly) {
+          await expect(update, `${table}: append-only, yet UPDATE was permitted`).rejects.toThrow(/permission denied/);
+          return;
+        }
+        expect((await update).rowCount, `${table}: updated foreign row ${victim}`).toBe(0);
       }
     });
   });
@@ -174,8 +191,12 @@ describe.each(TENANT_TABLES)('$table — cross-tenant access', ({ table, idColum
     const victims = await idsOf(table, idColumn, tenantColumn, ids.tenantB);
     await asTenant(ids.tenantA, async (c) => {
       for (const victim of victims) {
-        const res = await c.query(`DELETE FROM ${table} WHERE ${idColumn}::text = $1`, [victim]);
-        expect(res.rowCount, `${table}: deleted foreign row ${victim}`).toBe(0);
+        const del = c.query(`DELETE FROM ${table} WHERE ${idColumn}::text = $1`, [victim]);
+        if (appendOnly) {
+          await expect(del, `${table}: append-only, yet DELETE was permitted`).rejects.toThrow(/permission denied/);
+          return;
+        }
+        expect((await del).rowCount, `${table}: deleted foreign row ${victim}`).toBe(0);
       }
     });
     // and the rows are still there afterwards

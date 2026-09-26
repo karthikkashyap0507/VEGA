@@ -2,6 +2,7 @@ export * from './bundle.js';
 export * from './classify.js';
 export * from './combine.js';
 export * from './compile.js';
+export * from './distribution.js';
 export * from './evaluate.js';
 export * from './opa.js';
 export * from './presets.js';

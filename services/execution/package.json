@@ -24,8 +24,11 @@
     "@vega/idp": "workspace:*",
     "@vega/interpreter": "workspace:*",
     "@vega/orchestration": "workspace:*",
+    "@vega/policy-engine": "workspace:*",
+    "@vega/risk": "workspace:*",
     "@vega/runs": "workspace:*",
     "@vega/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.5",
     "iovalkey": "^0.4.0",
     "zod": "^4.6.5"
