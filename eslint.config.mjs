@@ -63,8 +63,33 @@ export default tseslint.config(
       'vega/no-plan-branching': 'error',
       // Module 2 enables this for packages/connectors when the first tool is declared.
       'vega/require-tool-declaration': ['error', { paths: ['packages/connectors/'] }],
-      // Module 3 enables this by naming the privileged planner paths and untrusted types.
-      'vega/no-untrusted-in-privileged': ['error', { privilegedPaths: [] }],
+      // INVARIANT 5, enabled in Module 3: the privileged planner cannot import anything that
+      // carries untrusted content, nor name the types that do. It receives SourceMetadata.
+      'vega/no-untrusted-in-privileged': [
+        'error',
+        {
+          privilegedPaths: ['packages/planner/src/'],
+          untrustedTypes: ['TaintedValue', 'Untrusted', 'Sourced', 'ToolResult', 'Effect', 'FetchedPage'],
+          untrustedModules: [
+            '@vega/taint',
+            '@vega/interpreter',
+            '@vega/db',
+            '@vega/connectors',
+            '@vega/connector-sdk',
+            '@vega/connector-gmail',
+            '@vega/connector-gcal',
+            '@vega/connector-gdrive',
+            '@vega/connector-outlook',
+            '@vega/connector-sharepoint',
+            '@vega/connector-slack',
+            '@vega/connector-web',
+            '@vega/connector-http',
+            '@vega/connector-mcp',
+            '@vega/connector-testing',
+          ],
+        },
+      ],
+      'vega/no-taint-cast': 'error',
     },
   },
   {

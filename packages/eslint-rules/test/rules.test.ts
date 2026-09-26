@@ -134,6 +134,19 @@ tester.run('require-tool-declaration', rule('require-tool-declaration'), {
   ],
 });
 
+tester.run('no-taint-cast', rule('no-taint-cast'), {
+  valid: [
+    { filename: at('packages/taint/src/value.ts'), code: `const v = x as unknown as TaintedValue<T>;` },
+    { filename: at('packages/interpreter/src/a.ts'), code: `const v = derive(1, [a], 'v');` },
+  ],
+  invalid: [
+    { filename: at('packages/interpreter/src/a.ts'), code: `const v = x as unknown as TaintedValue;`, errors: [{ messageId: 'cast' }] },
+    { filename: at('services/execution/src/a.ts'), code: `const v = <Untrusted<string>>x;`, errors: [{ messageId: 'cast' }] },
+    { filename: at('services/execution/src/a.ts'), code: `const v = x as Array<TaintedValue>;`, errors: [{ messageId: 'cast' }] },
+    { filename: at('apps/web/src/a.ts'), code: `const v = x satisfies TaintedValue | null;`, errors: [{ messageId: 'cast' }] },
+  ],
+});
+
 tester.run('no-untrusted-in-privileged (inert until configured by M3)', rule('no-untrusted-in-privileged'), {
   valid: [
     { filename: at('packages/planner/src/plan.ts'), code: `import { Untrusted } from '@vega/taint';` },

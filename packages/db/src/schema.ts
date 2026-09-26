@@ -284,6 +284,77 @@ export const mcpTools = pgTable('mcp_tools', {
   discoveredAt: timestamp('discovered_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ------------------------------------------------------------------ Module 3: provenance & taint
+export const sources = pgTable('sources', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: text('run_id'),
+  uri: text('uri').notNull(),
+  connectorId: uuid('connector_id'),
+  taint: text('taint').notNull(),
+  digest: text('digest').notNull(),
+  contentRef: text('content_ref'),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  meta: jsonb('meta').notNull().default({}),
+});
+
+export const derivations = pgTable('derivations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: text('run_id').notNull(),
+  valueRef: text('value_ref').notNull(),
+  op: text('op').notNull(),
+  sourceIds: text('source_ids').array().notNull().default([]),
+  inputRefs: text('input_refs').array().notNull().default([]),
+  taint: text('taint').notNull(),
+  dataTaint: text('data_taint').notNull(),
+  contextTaint: text('context_taint').notNull(),
+  nodeId: text('node_id'),
+  stepIndex: integer('step_index').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const taintViolations = pgTable('taint_violations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: text('run_id').notNull(),
+  nodeId: text('node_id'),
+  toolId: text('tool_id').notNull(),
+  kind: text('kind').notNull(),
+  attemptedTaint: text('attempted_taint').notNull(),
+  declaredMax: text('declared_max').notNull(),
+  argPath: text('arg_path').notNull(),
+  sourceIds: text('source_ids').array().notNull().default([]),
+  programRef: text('program_ref').notNull(),
+  severity: text('severity').notNull(),
+  detail: text('detail').notNull().default(''),
+  acknowledgedBy: uuid('acknowledged_by'),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const programs = pgTable('programs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: text('run_id').notNull(),
+  astJson: jsonb('ast_json').notNull(),
+  astDigest: text('ast_digest').notNull(),
+  modelId: text('model_id').notNull(),
+  valid: boolean('valid').notNull(),
+  validationErrors: jsonb('validation_errors'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const trustedContacts = pgTable('trusted_contacts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  email: text('email').notNull(),
+  displayName: text('display_name'),
+  company: text('company'),
+  addedBy: uuid('added_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -298,6 +369,11 @@ export const TENANT_SCOPED_TABLES = [
   'tool_invocations',
   'connector_events',
   'mcp_tools',
+  'sources',
+  'derivations',
+  'taint_violations',
+  'programs',
+  'trusted_contacts',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

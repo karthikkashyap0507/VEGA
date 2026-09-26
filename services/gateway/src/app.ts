@@ -15,6 +15,7 @@ import { Sealer } from './sealed.js';
 import type { SessionService } from './sessions.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerConnectorRoutes } from './routes/connectors.js';
+import { registerProgramRoutes } from './routes/programs.js';
 import { registerResourceRoutes } from './routes/resources.js';
 import { registerSystemRoutes } from './routes/system.js';
 
@@ -289,6 +290,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   registerAuthRoutes(app, hooks, deps, { loginSealer, cookieName });
   registerResourceRoutes(app, hooks, deps);
   registerConnectorRoutes(app, hooks, deps);
+  registerProgramRoutes(app, hooks, deps);
 
   return app;
 }

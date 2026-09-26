@@ -127,6 +127,22 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
         [tenantId, conn.rows[0]!.id],
       );
 
+      await client.query(`INSERT INTO sources (tenant_id, run_id, uri, taint, digest) VALUES ($1, 'seed', 'gmail:seed', 'UNTRUSTED', 'sha256:seed')`, [tenantId]);
+      await client.query(
+        `INSERT INTO derivations (tenant_id, run_id, value_ref, op, taint, data_taint, context_taint, step_index) VALUES ($1, 'seed', 'v1', 'literal', 'TRUSTED', 'TRUSTED', 'TRUSTED', 1)`,
+        [tenantId],
+      );
+      await client.query(
+        `INSERT INTO taint_violations (tenant_id, run_id, tool_id, kind, attempted_taint, declared_max, arg_path, program_ref, severity)
+         VALUES ($1, 'seed', 'gmail.send', 'RECIPIENT', 'UNTRUSTED', 'TRUSTED', 'to[0]', 'sha256:seed', 'CRITICAL')`,
+        [tenantId],
+      );
+      await client.query(`INSERT INTO programs (tenant_id, run_id, ast_json, ast_digest, model_id, valid) VALUES ($1, 'seed', '{}', 'sha256:seed', 'seed', true)`, [tenantId]);
+      await client.query(
+        `INSERT INTO trusted_contacts (tenant_id, email, added_by) VALUES ($1, 'seed-' || substr(md5(random()::text), 1, 8) || '@partner.example', $2)`,
+        [tenantId, userId],
+      );
+
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;
       made['workspace' + key] = workspaceId;

@@ -10,6 +10,7 @@ import noEval from './rules/no-eval.js';
 import noEvidenceWriteFromExecution from './rules/no-evidence-write-from-execution.js';
 import noPlanBranching from './rules/no-plan-branching.js';
 import noRawDbPool from './rules/no-raw-db-pool.js';
+import noTaintCast from './rules/no-taint-cast.js';
 import noUntrustedInPrivileged from './rules/no-untrusted-in-privileged.js';
 import requireTenantContext from './rules/require-tenant-context.js';
 import requireToolDeclaration from './rules/require-tool-declaration.js';
@@ -22,6 +23,7 @@ export const rules = {
   'no-untrusted-in-privileged': noUntrustedInPrivileged,
   'require-tool-declaration': requireToolDeclaration,
   'no-plan-branching': noPlanBranching,
+  'no-taint-cast': noTaintCast,
 };
 
 const plugin = { meta: { name: '@vega/eslint-rules', version: '0.0.0' }, rules };

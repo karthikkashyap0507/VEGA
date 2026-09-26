@@ -9,11 +9,16 @@ export { safeFetch, isPublicAddress, ALLOWED_TYPES, type FetchedPage, type SafeF
  * Web fetch & search — docs/module2.md §5.2, §10.3.
  *
  * | Tool       | Egress | Rev | Max taint | Idempotency | Notes                          |
- * | web.fetch  | PUBLIC | R0  | UNTRUSTED | NONE        | isolated pod, no credentials   |
- * | web.search | PUBLIC | R0  | UNTRUSTED | NONE        | SearXNG as a network service   |
+ * | web.fetch  | PUBLIC | R0  | ORG       | NONE        | isolated pod, no credentials   |
+ * | web.search | PUBLIC | R0  | ORG       | NONE        | SearXNG as a network service   |
  *
  * Output is UNTRUSTED unconditionally and cannot be overridden: there is no argument, config or
  * connector setting that changes the label.
+ *
+ * Max taint is ORG, not UNTRUSTED (docs/module3.md §5.3): the URL and the query leave the
+ * organization, so a URL or query derived from untrusted content — "fetch the link in this
+ * email", a link found on a poisoned page — is an exfiltration channel (data in the query
+ * string, a read receipt) and waits for a human. Found by the Module 3 red-team corpus.
  *
  * Backend: in a cluster the execution plane never fetches the web itself — it calls the
  * isolated web-fetch service (WEB_FETCH_URL), the only pod with public egress. Locally, and in
@@ -85,7 +90,7 @@ export const fetchTool = defineTool({
   scopes: [],
   egressClass: 'PUBLIC',
   reversibility: 'R0',
-  maxTaint: 'UNTRUSTED',
+  maxTaint: 'ORG',
   idempotency: 'NONE',
   sensitivityHint: 20,
   holdSupported: false,
@@ -129,7 +134,7 @@ export const searchTool = defineTool({
   scopes: [],
   egressClass: 'PUBLIC',
   reversibility: 'R0',
-  maxTaint: 'UNTRUSTED',
+  maxTaint: 'ORG',
   idempotency: 'NONE',
   sensitivityHint: 10,
   holdSupported: false,

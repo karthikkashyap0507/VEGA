@@ -32,6 +32,7 @@
     "@trpc/client": "^11.19.0",
     "@types/node": "^22.20.1",
     "@vega/connector-testing": "workspace:*",
+    "@vega/interpreter": "workspace:*",
     "tsx": "^4.19.0",
     "vitest": "^2.1.9",
     "zod": "^4.6.5"

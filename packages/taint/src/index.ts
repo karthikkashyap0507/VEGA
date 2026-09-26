@@ -1,2 +1,2 @@
-// @vega/taint - implemented in M3. See docs/module3.md
-export {};
+export * from './lattice.js';
+export * from './value.js';

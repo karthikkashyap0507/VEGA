@@ -1,0 +1,24 @@
+{
+  "name": "@vega/eval-redteam",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "export": "cd ../.. && tsx evals/redteam/src/export.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vega/connectors": "workspace:*",
+    "@vega/contracts": "workspace:*",
+    "@vega/dsl": "workspace:*",
+    "@vega/interpreter": "workspace:*",
+    "@vega/planner": "workspace:*",
+    "@vega/taint": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.9"
+  }
+}

@@ -133,6 +133,34 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  evals/redteam:
+    dependencies:
+      '@vega/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors/registry
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@vega/dsl':
+        specifier: workspace:*
+        version: link:../../packages/dsl
+      '@vega/interpreter':
+        specifier: workspace:*
+        version: link:../../packages/interpreter
+      '@vega/planner':
+        specifier: workspace:*
+        version: link:../../packages/planner
+      '@vega/taint':
+        specifier: workspace:*
+        version: link:../../packages/taint
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
   evals/simulation:
     dependencies:
       '@vega/connector-sdk':
@@ -154,6 +182,31 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.23.12
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
+  evals/taint-soundness:
+    dependencies:
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@vega/dsl':
+        specifier: workspace:*
+        version: link:../../packages/dsl
+      '@vega/interpreter':
+        specifier: workspace:*
+        version: link:../../packages/interpreter
+      '@vega/taint':
+        specifier: workspace:*
+        version: link:../../packages/taint
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
       vitest:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
@@ -474,7 +527,24 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
-  packages/dsl: {}
+  packages/dsl:
+    dependencies:
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@vega/taint':
+        specifier: workspace:*
+        version: link:../taint
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@vega/connectors':
+        specifier: workspace:*
+        version: link:../connectors/registry
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
   packages/eslint-rules: {}
 
@@ -488,13 +558,73 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
-  packages/interpreter: {}
+  packages/interpreter:
+    dependencies:
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@vega/db':
+        specifier: workspace:*
+        version: link:../db
+      '@vega/dsl':
+        specifier: workspace:*
+        version: link:../dsl
+      '@vega/taint':
+        specifier: workspace:*
+        version: link:../taint
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@vega/connectors':
+        specifier: workspace:*
+        version: link:../connectors/registry
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
   packages/knowledge: {}
+
+  packages/llm:
+    devDependencies:
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
   packages/memory: {}
 
   packages/orchestration: {}
+
+  packages/planner:
+    dependencies:
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@vega/dsl':
+        specifier: workspace:*
+        version: link:../dsl
+      '@vega/llm':
+        specifier: workspace:*
+        version: link:../llm
+    devDependencies:
+      '@vega/connectors':
+        specifier: workspace:*
+        version: link:../connectors/registry
+      '@vega/interpreter':
+        specifier: workspace:*
+        version: link:../interpreter
+      '@vega/taint':
+        specifier: workspace:*
+        version: link:../taint
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
   packages/policy-engine: {}
 
@@ -522,7 +652,15 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
-  packages/taint: {}
+  packages/taint:
+    dependencies:
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
   packages/telemetry:
     dependencies:
@@ -598,6 +736,9 @@ importers:
       '@vega/connector-testing':
         specifier: workspace:*
         version: link:../../packages/connectors/testing
+      '@vega/interpreter':
+        specifier: workspace:*
+        version: link:../../packages/interpreter
       tsx:
         specifier: ^4.19.0
         version: 4.23.12
@@ -656,12 +797,21 @@ importers:
       '@vega/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors/registry
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@vega/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@vega/dsl':
+        specifier: workspace:*
+        version: link:../../packages/dsl
       '@vega/idp':
         specifier: workspace:*
         version: link:../../packages/idp
+      '@vega/interpreter':
+        specifier: workspace:*
+        version: link:../../packages/interpreter
       '@vega/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -678,6 +828,31 @@ importers:
       '@vega/connector-testing':
         specifier: workspace:*
         version: link:../../packages/connectors/testing
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
+  services/extractor:
+    dependencies:
+      '@vega/interpreter':
+        specifier: workspace:*
+        version: link:../../packages/interpreter
+      '@vega/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@vega/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
       tsx:
         specifier: ^4.19.0
         version: 4.23.12
@@ -3086,6 +3261,10 @@ packages:
     resolution: {integrity: sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==}
     engines: {node: '>= 18'}
 
+  fast-check@4.10.2:
+    resolution: {integrity: sha512-iK2f+YrcmoeGqk6fA0ea2bptcu/itMIm4NfEozq6N25+aG6h7s5HZbB/k1aV7b5w5sFLMCbbtRUsTVR+BgC3xw==}
+    engines: {node: '>=12.17.0'}
+
   fast-copy@4.0.4:
     resolution: {integrity: sha512-eVAiWVNPSEGIzDl5yPuLrx8fNMogScXvD9xp1Kzd41FjRIz2I3sSIcxsFeM5EzFfHAfobdvs8ZySffUopljvIA==}
 
@@ -3697,6 +3876,9 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  pure-rand@8.4.2:
+    resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
 
   qs@6.16.0:
     resolution: {integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==}
@@ -6045,6 +6227,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  fast-check@4.10.2:
+    dependencies:
+      pure-rand: 8.4.2
+
   fast-copy@4.0.4: {}
 
   fast-decode-uri-component@1.0.1: {}
@@ -6621,6 +6807,8 @@ snapshots:
       once: 1.4.0
 
   punycode@2.3.1: {}
+
+  pure-rand@8.4.2: {}
 
   qs@6.16.0:
     dependencies:

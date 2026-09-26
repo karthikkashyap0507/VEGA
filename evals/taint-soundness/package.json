@@ -1,0 +1,22 @@
+{
+  "name": "@vega/eval-taint-soundness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/generate.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vega/contracts": "workspace:*",
+    "@vega/dsl": "workspace:*",
+    "@vega/interpreter": "workspace:*",
+    "@vega/taint": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2",
+    "vitest": "^2.1.9"
+  }
+}

@@ -12,6 +12,7 @@ import {
 import { McpToolSource, PgMcpToolStore } from '@vega/connector-mcp';
 import { remoteBackend, setWebBackend } from '@vega/connector-web';
 import { launchRegistry, oauthClientsFromEnv } from '@vega/connectors';
+import { HttpExtractor, NtfyPager, PgEntities, type ExtractorPort } from '@vega/interpreter';
 import { buildExecutionApp } from './app.js';
 import { EvidenceAppendClient } from './evidence-append.js';
 
@@ -41,8 +42,9 @@ try {
   logger.warn({ err: error }, 'DEV: Valkey unreachable; connector rate limits are per-process only');
 }
 const mcpStore = new PgMcpToolStore();
+const registry = launchRegistry();
 const runtime = new ConnectorRuntime({
-  registry: launchRegistry(),
+  registry,
   dynamicTools: new McpToolSource(mcpStore),
   connectors: new PgConnectorStore(),
   vault: new PgTokenVault(),
@@ -56,9 +58,21 @@ if (!internalToken) {
   logger.warn('DEV: EXECUTION_INTERNAL_TOKEN unset: the connector API is not mounted');
 }
 
+// ---------------------------------------------------------------- interpreter (Module 3)
+// Untrusted content is shown to a model ONLY in the quarantined extractor pod.
+let extractor: ExtractorPort;
+if (env['EXTRACTOR_URL'] && env['EXTRACTOR_TOKEN']) {
+  extractor = new HttpExtractor(env['EXTRACTOR_URL'], env['EXTRACTOR_TOKEN'], tls ? mtlsFetch(tls) : undefined);
+} else {
+  if (production) throw new Error('EXTRACTOR_URL and EXTRACTOR_TOKEN are required in production');
+  logger.warn('DEV: no EXTRACTOR_URL — extraction steps fail closed until services/extractor is running');
+  extractor = { extract: async () => { throw new Error('extractor not configured'); } };
+}
+const pager = env['NTFY_URL'] ? new NtfyPager(env['NTFY_URL']) : { page: async (v: { severity: string; toolId: string; runId: string }) => logger.error({ alert: true, ...v }, 'TAINT VIOLATION') };
+
 const app = await buildExecutionApp({
   ...(token ? { evidence: new EvidenceAppendClient(evidenceUrl, token, tls ? mtlsFetch(tls) : undefined) } : {}),
-  ...(internalToken ? { connectors: { runtime, mcpStore, token: internalToken } } : {}),
+  ...(internalToken ? { connectors: { runtime, mcpStore, token: internalToken }, programs: { runtime, registry, extractor, entities: new PgEntities(), pager } } : {}),
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });
 const port = Number(env['EXECUTION_PORT'] ?? 3003);

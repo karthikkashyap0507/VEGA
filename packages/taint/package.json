@@ -9,5 +9,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint ."
+  },
+  "dependencies": {
+    "@vega/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
   }
 }

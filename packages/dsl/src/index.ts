@@ -1,2 +1,4 @@
-// @vega/dsl - implemented in M3. See docs/module3.md
-export {};
+export * from './ast.js';
+export { parse, ParseError } from './parser.js';
+export { print, expr as printExpr } from './printer.js';
+export * from './validate.js';

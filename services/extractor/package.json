@@ -1,0 +1,26 @@
+{
+  "name": "@vega/service-extractor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/app.ts",
+  "types": "src/app.ts",
+  "scripts": {
+    "dev": "cd ../.. && tsx watch --env-file-if-exists=.env services/extractor/src/main.ts",
+    "start": "cd ../.. && tsx --env-file-if-exists=.env services/extractor/src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@vega/interpreter": "workspace:*",
+    "@vega/llm": "workspace:*",
+    "@vega/shared": "workspace:*",
+    "fastify": "^5.12.5",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.9"
+  }
+}

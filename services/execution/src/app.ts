@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { EvidenceAppendClient } from './evidence-append.js';
 import { registerConnectorApi, type ConnectorApiDeps } from './connectors.js';
+import { registerProgramApi, type ProgramApiDeps } from './programs.js';
 
 /**
  * Execution plane (module1.md §5.1). Module 2 adds the connector runtime behind an internal
@@ -13,6 +14,8 @@ import { registerConnectorApi, type ConnectorApiDeps } from './connectors.js';
 export async function buildExecutionApp(options: {
   evidence?: EvidenceAppendClient;
   connectors?: ConnectorApiDeps;
+  /** Module 3: the capability interpreter. Mounted behind the same service token. */
+  programs?: ProgramApiDeps;
   https?: Record<string, unknown>;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, ...(options.https ? { https: options.https } : {}) }) as unknown as FastifyInstance;
@@ -22,5 +25,6 @@ export async function buildExecutionApp(options: {
     return reply.code(ready ? 200 : 503).send({ status: ready ? 'ready' : 'evidence_append_unconfigured' });
   });
   if (options.connectors) registerConnectorApi(app, options.connectors);
+  if (options.connectors && options.programs) registerProgramApi(app, options.programs);
   return app;
 }

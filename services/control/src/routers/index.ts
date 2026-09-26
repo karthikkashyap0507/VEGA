@@ -2,6 +2,7 @@ import { router } from '../trpc.js';
 import { agentsRouter } from './agents.js';
 import { connectorsRouter } from './connectors.js';
 import { mcpRouter } from './mcp.js';
+import { contactsRouter, programsRouter, securityRouter } from './programs.js';
 import { toolsRouter } from './tools.js';
 import { meRouter } from './me.js';
 import { signupRouter } from './signup.js';
@@ -18,6 +19,9 @@ export const appRouter = router({
   connectors: connectorsRouter,
   tools: toolsRouter,
   mcp: mcpRouter,
+  programs: programsRouter,
+  security: securityRouter,
+  contacts: contactsRouter,
   signup: signupRouter,
 });
 

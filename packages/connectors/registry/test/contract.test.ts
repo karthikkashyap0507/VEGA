@@ -92,7 +92,8 @@ describe('launch declarations (module2.md §5.2 table)', () => {
     ['gdrive.write', 'INTERNAL', 'R1', 'ORG', 'KEYED', false],
     ['gdrive.share', 'EXTERNAL', 'R1', 'TRUSTED', 'KEYED', true],
     ['slack.post', 'EXTERNAL', 'R2', 'TRUSTED', 'KEYED', true],
-    ['web.fetch', 'PUBLIC', 'R0', 'UNTRUSTED', 'NONE', false],
+    // module2.md §5.2 says UNTRUSTED; module3.md §5.3 supersedes it: a URL leaves the org, so ORG (see web/src/index.ts).
+    ['web.fetch', 'PUBLIC', 'R0', 'ORG', 'NONE', false],
     ['http.request', 'PUBLIC', 'R3', 'TRUSTED', 'NONE', true],
   ];
 
