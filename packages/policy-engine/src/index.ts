@@ -1,2 +1,9 @@
-// @vega/policy-engine - implemented in M5. See docs/module5.md
-export {};
+export * from './bundle.js';
+export * from './classify.js';
+export * from './combine.js';
+export * from './compile.js';
+export * from './evaluate.js';
+export * from './opa.js';
+export * from './presets.js';
+export * from './router.js';
+export * from './schema.js';

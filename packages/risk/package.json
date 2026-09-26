@@ -9,5 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint ."
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2",
+    "vitest": "^2.1.9"
   }
 }
