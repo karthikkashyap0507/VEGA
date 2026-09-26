@@ -183,21 +183,31 @@ cannot `can_run_agent` in B. ✅
 without a principal returns `tenant-context-missing` (500); double-POST with one idempotency key
 produces one effect. ✅
 
-## Step 6 — Web shell (5–6 days)
+## Step 6 — Web shell ✅ COMPLETE
 
-- [ ] Next.js App Router with the six route groups; five render **styled empty states naming the
-      module that fills them** — not `TODO` pages, a design partner sees this
-- [ ] Tailwind + shadcn/ui; semantic tokens only, no raw hex in components
-- [ ] Light + dark themes
-- [ ] **Risk-tier tokens defined once here** (`--risk-low/medium/high/critical`) and used
-      everywhere after. Never color alone — always paired with a label and icon, because these
-      screens end up printed in compliance evidence
-- [ ] **Admin console fully working:** tenant settings (retention floor 180 days enforced in UI
-      *and* API), users (invite / role / deactivate), workspaces, agents (list/create/ownership),
-      sessions
+- [x] Next.js App Router (`apps/web`) with the six surfaces; five render **styled empty states naming
+      the module that fills them**, with what the surface will do
+- [x] Tailwind v4 + shadcn/ui-style components on Radix primitives; semantic tokens only — colour
+      values live in `globals.css` and nowhere else
+- [x] Light + dark themes: `:root`, `prefers-color-scheme`, and an explicit `[data-theme]` choice
+- [x] **Risk-tier tokens** `--risk-low/medium/high/critical` defined once; `<RiskBadge>` always pairs
+      colour with a label and an icon
+- [x] **Admin console fully working:** organization (retention floor enforced in the form, the API
+      and the database), users (invite / role / deactivate / reactivate / remove), workspaces
+      (create / rename / archive / membership), agents (create / re-own / suspend / archive), sessions
+      (list / revoke), security
 
-**DoD:** sign in → land in tenant → all six surfaces reachable → complete an invite-to-agent-create
-flow without touching the database.
+**DoD:** `e2e/tests/admin-flow.spec.ts` signs in through the real Zitadel login UI, reaches all six
+surfaces, and completes invite → workspace → agent through the browser with no database access. ✅
+
+### Decisions taken during Step 6
+
+| Decision | Why |
+|---|---|
+| **`/v1` proxied through Next rewrites (same origin)** | The session cookie stays httpOnly + SameSite=Lax with no CORS surface; in a cluster the ingress routes `/v1` the same way. |
+| **Webpack, not Turbopack** | Workspace packages use NodeNext `.js` specifiers for `.ts` sources; webpack's `extensionAlias` maps them, Turbopack does not yet. Revisit when it does. |
+| **Native `<select>` for role/status pickers** | Dense admin tables; a native control is keyboard- and screen-reader-correct by default. |
+| **UI capability checks hide, never enforce** | `useCan()` reads `/v1/me` capabilities to hide controls; every call is re-authorized in the control plane (invariant 6). |
 
 ---
 

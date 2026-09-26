@@ -42,3 +42,7 @@ infra/docker/volumes/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# playwright
+test-results/
+playwright-report/

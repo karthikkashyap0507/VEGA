@@ -1,0 +1,135 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens — module1.md §6.3.
+ *
+ * SEMANTIC TOKENS ONLY. Components reference `bg-surface`, `text-muted`, `border-border`,
+ * never a raw colour. This file is the one place colour values live, so a rebrand or a
+ * contrast fix is a token edit, not a hunt through components.
+ *
+ * Themes: tokens defined on :root (light), redefined for dark under prefers-color-scheme
+ * unless the user forced light, and again under [data-theme="dark"] for an explicit choice.
+ */
+
+:root {
+  --background: #f7f7f5;
+  --surface: #ffffff;
+  --surface-muted: #f0f0ec;
+  --foreground: #1b1c1e;
+  --muted: #5d6068;
+  --border: #dedfdb;
+  --ring: #3b5bdb;
+  --primary: #2f4ac0;
+  --primary-foreground: #ffffff;
+  --danger: #b42318;
+  --danger-foreground: #ffffff;
+  --success: #1f7a4d;
+
+  /*
+   * Risk-tier semantics, defined ONCE here and used everywhere after (module1.md §6.3).
+   * Never colour alone: <RiskBadge> always pairs the colour with a label and an icon,
+   * because these screens are printed into compliance evidence.
+   */
+  --risk-low: #5d6068;
+  --risk-low-bg: #eceee9;
+  --risk-medium: #8a5a00;
+  --risk-medium-bg: #fdf1d6;
+  --risk-high: #b54708;
+  --risk-high-bg: #fde8d7;
+  --risk-critical: #b42318;
+  --risk-critical-bg: #fde4e1;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --background: #111214;
+    --surface: #1a1b1f;
+    --surface-muted: #23252a;
+    --foreground: #eceef1;
+    --muted: #a3a7b0;
+    --border: #30333a;
+    --ring: #7d93ff;
+    --primary: #7d93ff;
+    --primary-foreground: #0b0d14;
+    --danger: #ff8a80;
+    --danger-foreground: #1a0503;
+    --success: #6fd4a0;
+    --risk-low: #b8bcc4;
+    --risk-low-bg: #2a2c31;
+    --risk-medium: #f5c451;
+    --risk-medium-bg: #3a2f12;
+    --risk-high: #ffa36b;
+    --risk-high-bg: #3d2415;
+    --risk-critical: #ff8a80;
+    --risk-critical-bg: #3f1a17;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --background: #111214;
+  --surface: #1a1b1f;
+  --surface-muted: #23252a;
+  --foreground: #eceef1;
+  --muted: #a3a7b0;
+  --border: #30333a;
+  --ring: #7d93ff;
+  --primary: #7d93ff;
+  --primary-foreground: #0b0d14;
+  --danger: #ff8a80;
+  --danger-foreground: #1a0503;
+  --success: #6fd4a0;
+  --risk-low: #b8bcc4;
+  --risk-low-bg: #2a2c31;
+  --risk-medium: #f5c451;
+  --risk-medium-bg: #3a2f12;
+  --risk-high: #ffa36b;
+  --risk-high-bg: #3d2415;
+  --risk-critical: #ff8a80;
+  --risk-critical-bg: #3f1a17;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-success: var(--success);
+  --color-risk-low: var(--risk-low);
+  --color-risk-low-bg: var(--risk-low-bg);
+  --color-risk-medium: var(--risk-medium);
+  --color-risk-medium-bg: var(--risk-medium-bg);
+  --color-risk-high: var(--risk-high);
+  --color-risk-high-bg: var(--risk-high-bg);
+  --color-risk-critical: var(--risk-critical);
+  --color-risk-critical-bg: var(--risk-critical-bg);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px; /* compact default: approval queues and audit tables dominate (§6.3) */
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

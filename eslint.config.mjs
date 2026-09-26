@@ -10,6 +10,9 @@ export default tseslint.config(
       '**/.next/**',
       '**/.turbo/**',
       '**/coverage/**',
+      '**/next-env.d.ts',
+      'test-results/**',
+      'playwright-report/**',
     ],
   },
   js.configs.recommended,
@@ -38,6 +41,11 @@ export default tseslint.config(
       // Silent failure is how an ungoverned deployment reaches a customer.
       'no-empty': ['error', { allowEmptyCatch: false }],
     },
+  },
+  {
+    // The web app runs in the browser: DOM globals, not Node's.
+    files: ['apps/web/**/*.{ts,tsx}'],
+    languageOptions: { globals: { ...globals.browser } },
   },
   {
     files: ['**/*.mjs', '**/*.js'],
