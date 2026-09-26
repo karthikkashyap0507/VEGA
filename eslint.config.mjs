@@ -47,7 +47,12 @@ export default tseslint.config(
     // Architectural invariants (module1.md §5.6). Errors, never warnings: a failure means
     // the architecture drifted. Scoped to production source — tests legitimately open raw
     // connections to assert what a database ROLE can and cannot do.
-    files: ['packages/*/src/**/*.{ts,tsx}', 'services/*/src/**/*.ts', 'apps/*/src/**/*.{ts,tsx}'],
+    files: [
+      'packages/*/src/**/*.{ts,tsx}',
+      'packages/connectors/*/src/**/*.ts',
+      'services/*/src/**/*.ts',
+      'apps/*/src/**/*.{ts,tsx}',
+    ],
     plugins: { vega },
     rules: {
       'vega/no-evidence-write-from-execution': 'error',

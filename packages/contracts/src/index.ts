@@ -7,3 +7,4 @@ export * from './workspace.js';
 export * from './agent.js';
 export * from './entitlements.js';
 export * from './signup.js';
+export * from './tools.js';

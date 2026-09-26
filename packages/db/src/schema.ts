@@ -1,5 +1,6 @@
 import {
   bigserial,
+  boolean,
   customType,
   inet,
   index,
@@ -194,6 +195,77 @@ export const idempotencyKeys = pgTable(
   (t) => [primaryKey({ columns: [t.tenantId, t.principalId, t.key] })],
 );
 
+// ============================ Module 2: connectors =============================
+
+export const connectors = pgTable('connectors', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  workspaceId: uuid('workspace_id'),
+  kind: text('kind').notNull(),
+  displayName: text('display_name').notNull(),
+  accountRef: text('account_ref'),
+  ownerUserId: uuid('owner_user_id').notNull(),
+  scopesGranted: text('scopes_granted').array().notNull().default([]),
+  scopesRequired: text('scopes_required').array().notNull().default([]),
+  enabledTools: text('enabled_tools').array().notNull().default([]),
+  config: jsonb('config').notNull().default({}),
+  secretRefId: uuid('secret_ref_id'),
+  status: text('status').notNull().default('pending'),
+  healthJson: jsonb('health_json').notNull().default({}),
+  lastOkAt: timestamp('last_ok_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** GLOBAL projection of the TypeScript declarations. Generated from code, never hand-edited. */
+export const toolDeclarations = pgTable('tool_declarations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  connectorKind: text('connector_kind').notNull(),
+  toolId: text('tool_id').notNull(),
+  version: integer('version').notNull(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  scopes: text('scopes').array().notNull(),
+  egressClass: text('egress_class').notNull(),
+  reversibility: text('reversibility').notNull(),
+  maxTaint: text('max_taint').notNull(),
+  outputTaint: text('output_taint').notNull(),
+  idempotency: text('idempotency').notNull(),
+  sensitivityHint: integer('sensitivity_hint').notNull(),
+  holdSupported: boolean('hold_supported').notNull(),
+  simulateFidelity: text('simulate_fidelity').notNull(),
+  compensatorRef: text('compensator_ref'),
+  recipientArgs: text('recipient_args').array().notNull(),
+  argsSchema: jsonb('args_schema').notNull(),
+  effectSchema: jsonb('effect_schema').notNull(),
+  costHint: jsonb('cost_hint'),
+  certifiedAt: timestamp('certified_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const toolInvocations = pgTable('tool_invocations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  connectorId: uuid('connector_id').notNull(),
+  toolId: text('tool_id').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  argsDigest: text('args_digest').notNull(),
+  state: text('state').notNull().default('in_flight'),
+  responseRef: text('response_ref'),
+  effectJson: jsonb('effect_json'),
+  errorCode: text('error_code'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+});
+
+export const connectorEvents = pgTable('connector_events', {
+  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+  tenantId: uuid('tenant_id').notNull(),
+  connectorId: uuid('connector_id').notNull(),
+  kind: text('kind').notNull(),
+  detail: jsonb('detail').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -204,10 +276,14 @@ export const TENANT_SCOPED_TABLES = [
   'platform_events',
   'sessions',
   'idempotency_keys',
+  'connectors',
+  'tool_invocations',
+  'connector_events',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */
 export const GLOBAL_TABLES: Record<string, string> = {
   plan_entitlements: 'Global reference data; tiers are data, not conditionals (D-09).',
+  tool_declarations: 'Projection of the code-defined tool declarations; identical for every tenant (module2.md §4).',
   _migrations: 'System ledger; the application role has no grants on it.',
 };

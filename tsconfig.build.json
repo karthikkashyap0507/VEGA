@@ -9,6 +9,7 @@
   },
   "include": [
     "packages/*/src/**/*",
+    "packages/connectors/*/src/**/*",
     "services/*/src/**/*"
   ],
   "exclude": [

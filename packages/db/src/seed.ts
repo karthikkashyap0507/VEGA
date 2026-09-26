@@ -107,6 +107,21 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
         [tenantId, userId],
       );
 
+      const conn = await client.query<{ id: string }>(
+        `INSERT INTO connectors (tenant_id, kind, display_name, owner_user_id, status)
+         VALUES ($1, 'gmail', 'Seed mailbox', $2, 'pending') RETURNING id`,
+        [tenantId, userId],
+      );
+      await client.query(
+        `INSERT INTO tool_invocations (tenant_id, connector_id, tool_id, idempotency_key, args_digest)
+         VALUES ($1, $2, 'gmail.send', 'seed-' || gen_random_uuid(), 'x')`,
+        [tenantId, conn.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO connector_events (tenant_id, connector_id, kind) VALUES ($1, $2, 'seeded')`,
+        [tenantId, conn.rows[0]!.id],
+      );
+
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;
       made['workspace' + key] = workspaceId;

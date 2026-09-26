@@ -1,5 +1,5 @@
 {
-  "name": "@vega/connectors",
+  "name": "@vega/connector-web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,5 +9,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint ."
+  },
+  "dependencies": {
+    "@vega/connector-sdk": "workspace:*",
+    "@vega/contracts": "workspace:*",
+    "undici": "^6.29.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
   }
 }

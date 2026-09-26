@@ -1,0 +1,22 @@
+{
+  "name": "@vega/connector-gcal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@vega/connector-sdk": "workspace:*",
+    "@vega/contracts": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@vega/connector-testing": "workspace:*",
+    "vitest": "^2.1.9"
+  }
+}

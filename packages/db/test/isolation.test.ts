@@ -29,6 +29,9 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'workspace_members', idColumn: 'workspace_id', tenantColumn: 'tenant_id' },
   { table: 'sessions', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'idempotency_keys', idColumn: 'key', tenantColumn: 'tenant_id' },
+  { table: 'connectors', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'tool_invocations', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'connector_events', idColumn: 'id', tenantColumn: 'tenant_id' },
 ];
 
 let appPool: pg.Pool;

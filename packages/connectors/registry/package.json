@@ -1,0 +1,30 @@
+{
+  "name": "@vega/connectors",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@vega/connector-gcal": "workspace:*",
+    "@vega/connector-gdrive": "workspace:*",
+    "@vega/connector-gmail": "workspace:*",
+    "@vega/connector-http": "workspace:*",
+    "@vega/connector-outlook": "workspace:*",
+    "@vega/connector-sdk": "workspace:*",
+    "@vega/connector-sharepoint": "workspace:*",
+    "@vega/connector-slack": "workspace:*",
+    "@vega/connector-web": "workspace:*",
+    "@vega/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@vega/connector-testing": "workspace:*",
+    "vitest": "^2.1.9",
+    "zod": "^4.6.5"
+  }
+}

@@ -91,23 +91,42 @@ tester.run('no-plan-branching', rule('no-plan-branching'), {
   ],
 });
 
-const complete = `defineTool({ scopes: [], egress: 'EXTERNAL', reversibility: 'R1', compensator: 'x', maxTaint: 'TRUSTED', idempotency: 'key' })`;
+const body = `toolId: 'gmail.draft', scopes: [], egressClass: 'INTERNAL', maxTaint: 'TRUSTED', outputTaint: 'ORG', idempotency: 'NATIVE', recipientArgs: [], argsSchema: a, effectSchema: e, simulate() {}, execute() {}`;
+const tool = (extra: string) => `defineTool({ ${body}, ${extra} })`;
+const file = at('packages/connectors/gmail/src/tools.ts');
 
 tester.run('require-tool-declaration', rule('require-tool-declaration'), {
   valid: [
-    { filename: at('packages/connectors/gmail/src/tools.ts'), code: complete },
+    { filename: file, code: tool(`reversibility: 'R1', compensatorRef: 'gmail.draft.delete'`) },
+    { filename: file, code: tool(`reversibility: 'R2', compensatorRef: 'gmail.send.recall'`) },
+    { filename: file, code: tool(`reversibility: 'R0'`) },
+    { filename: file, code: tool(`reversibility: 'R3', compensatorRef: null`) },
     { filename: at('services/control/src/x.ts'), code: `defineTool({})` }, // outside connectors: not its concern
   ],
   invalid: [
     {
-      filename: at('packages/connectors/gmail/src/tools.ts'),
-      code: `defineTool({ scopes: [], egress: 'EXTERNAL', reversibility: 'R1', maxTaint: 'TRUSTED', idempotency: 'key' })`,
-      errors: [{ messageId: 'missing', data: { key: 'compensator' } }],
+      filename: file,
+      code: tool(`reversibility: 'R1'`),
+      errors: [{ messageId: 'compensatorRequired', data: { rev: 'R1' } }],
     },
-    { filename: at('packages/connectors/gmail/src/tools.ts'), code: `defineTool(decl)`, errors: [{ messageId: 'notLiteral' }] },
     {
-      filename: at('packages/connectors/gmail/src/tools.ts'),
-      code: `defineTool({ ...base, scopes: [], egress: 'E', reversibility: 'R1', compensator: 'c', maxTaint: 'T', idempotency: 'k' })`,
+      filename: file,
+      code: tool(`reversibility: 'R2', compensatorRef: null`),
+      errors: [{ messageId: 'compensatorRequired', data: { rev: 'R2' } }],
+    },
+    { filename: file, code: tool(`reversibility: 'R3', compensatorRef: 'x.undo'`), errors: [{ messageId: 'compensatorForbidden' }] },
+    { filename: file, code: tool(`reversibility: rev, compensatorRef: 'x'`), errors: [{ messageId: 'reversibilityNotLiteral' }] },
+    {
+      filename: file,
+      code: `defineTool({ toolId: 'x.y', reversibility: 'R0', simulate() {}, execute() {} })`,
+      errors: ['scopes', 'egressClass', 'maxTaint', 'outputTaint', 'idempotency', 'recipientArgs', 'argsSchema', 'effectSchema'].map(
+        (key) => ({ messageId: 'missing' as const, data: { key } }),
+      ),
+    },
+    { filename: file, code: `defineTool(decl)`, errors: [{ messageId: 'notLiteral' }] },
+    {
+      filename: file,
+      code: `defineTool({ ...base, ${body}, reversibility: 'R0' })`,
       errors: [{ messageId: 'spread' }],
     },
   ],
