@@ -52,6 +52,8 @@ export interface CreateMachineInput {
  */
 export interface IdentityAdmin {
   createOrganization(name: string): Promise<{ orgId: string }>;
+  /** Compensation for a failed tenant provisioning. Idempotent. */
+  deleteOrganization(orgId: string): Promise<void>;
   createHumanUser(input: CreateHumanInput): Promise<{ userId: string }>;
   /** Returns the code only when the IdP is configured not to send mail itself (local dev). */
   createInviteCode(userId: string, options?: { returnCode?: boolean }): Promise<{ code?: string }>;
@@ -162,6 +164,10 @@ export class ZitadelAdmin implements IdentityAdmin {
     return { orgId: r.organizationId };
   }
 
+  async deleteOrganization(orgId: string): Promise<void> {
+    await this.call('DELETE', `/v2/organizations/${encodeURIComponent(orgId)}`);
+  }
+
   async createHumanUser(input: CreateHumanInput): Promise<{ userId: string }> {
     const r = await this.call<{ userId: string }>('POST', '/v2/users/human', {
       organization: { orgId: input.orgId },
@@ -237,7 +243,7 @@ export class InMemoryIdentityAdmin implements IdentityAdmin {
   readonly orgs = new Map<string, { name: string }>();
   readonly users = new Map<
     string,
-    { orgId: string; kind: 'human' | 'machine'; username: string; active: boolean; email?: string }
+    { orgId: string; kind: 'human' | 'machine'; username: string; active: boolean; email?: string; hasPassword?: boolean }
   >();
   private seq = 1000;
 
@@ -250,6 +256,11 @@ export class InMemoryIdentityAdmin implements IdentityAdmin {
     const orgId = this.id();
     this.orgs.set(orgId, { name });
     return { orgId };
+  }
+
+  async deleteOrganization(orgId: string) {
+    this.orgs.delete(orgId);
+    for (const [id, u] of this.users) if (u.orgId === orgId) this.users.delete(id);
   }
 
   async createHumanUser(input: CreateHumanInput) {
@@ -266,6 +277,7 @@ export class InMemoryIdentityAdmin implements IdentityAdmin {
       username: input.email,
       email: input.email,
       active: true,
+      hasPassword: Boolean(input.password),
     });
     return { userId };
   }

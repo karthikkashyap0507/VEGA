@@ -75,5 +75,5 @@ export function tenantAttributes(input: {
   return attrs;
 }
 
-export { trace, context };
+export { trace, context, propagation } from '@opentelemetry/api';
 export type { Span, Tracer };

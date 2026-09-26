@@ -47,6 +47,8 @@ describe.each(implementations)('IdentityAdmin contract — %s', (_name, make, en
     await admin.deactivateUser(human.userId);
     await admin.reactivateUser(human.userId);
     await admin.deleteUser(agentB.userId);
+    await admin.deleteOrganization(orgId);
+    await expect(admin.deleteOrganization(orgId)).resolves.toBeUndefined();
   });
 
   it.runIf(enabled)('refuses a duplicate machine username within an org', async () => {

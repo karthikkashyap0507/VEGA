@@ -25,3 +25,16 @@ export const WorkspaceMember = z.object({
   addedAt: Timestamp,
 });
 export type WorkspaceMember = z.infer<typeof WorkspaceMember>;
+
+export const UpdateWorkspace = z.object({
+  name: z.string().min(1).max(200).optional(),
+  /** true archives, false restores. Archival is reversible; deletion is not offered. */
+  archived: z.boolean().optional(),
+});
+export type UpdateWorkspace = z.infer<typeof UpdateWorkspace>;
+
+export const AddWorkspaceMember = z.object({
+  userId: Uuid,
+  role: WorkspaceRole.default('member'),
+});
+export type AddWorkspaceMember = z.infer<typeof AddWorkspaceMember>;

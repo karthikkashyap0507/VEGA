@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   createLocalJWKSet,
+  createRemoteJWKSet,
   exportJWK,
   generateKeyPair,
   importPKCS8,
@@ -36,7 +37,16 @@ export interface PrincipalClaims {
   sessionId?: string;
   /** W3C trace id, so control-plane logs correlate without re-deriving it. */
   traceId?: string;
+  /**
+   * A system principal acts for no user and no tenant. The only one that exists is `signup`:
+   * provisioning a tenant necessarily happens before either does. The control plane admits
+   * system principals to exactly the procedures that declare them, and nothing else.
+   */
+  system?: 'signup';
 }
+
+/** Sentinel ids for system principals. Never valid uuids, so withTenant refuses them. */
+export const SYSTEM_TENANT = 'system';
 
 export class PrincipalAssertionError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -81,6 +91,7 @@ export class PrincipalAssertionIssuer {
       tid: claims.tenantId,
       ...(claims.sessionId ? { sid: claims.sessionId } : {}),
       ...(claims.traceId ? { trc: claims.traceId } : {}),
+      ...(claims.system ? { sys: claims.system } : {}),
     })
       .setProtectedHeader({ alg: ALG, kid: this.keyId, typ: TYP })
       .setIssuer(this.issuer)
@@ -94,14 +105,16 @@ export class PrincipalAssertionIssuer {
 }
 
 export class PrincipalAssertionVerifier {
-  private readonly keys: ReturnType<typeof createLocalJWKSet>;
+  private readonly keys: ReturnType<typeof createLocalJWKSet> | ReturnType<typeof createRemoteJWKSet>;
 
   constructor(
-    jwks: JSONWebKeySet,
+    jwks: JSONWebKeySet | URL,
     private readonly issuer: string,
     private readonly audience: string,
   ) {
-    this.keys = createLocalJWKSet(jwks);
+    // A URL means "the gateway's published JWKS": the control plane then holds no key
+    // material at all, and a rotated gateway key is picked up on the first unknown `kid`.
+    this.keys = jwks instanceof URL ? createRemoteJWKSet(jwks, { cooldownDuration: 5_000 }) : createLocalJWKSet(jwks);
   }
 
   async verify(token: string): Promise<PrincipalClaims> {
@@ -126,6 +139,7 @@ export class PrincipalAssertionVerifier {
       userId: payload.sub,
       ...(typeof payload['sid'] === 'string' ? { sessionId: payload['sid'] } : {}),
       ...(typeof payload['trc'] === 'string' ? { traceId: payload['trc'] } : {}),
+      ...(payload['sys'] === 'signup' ? { system: 'signup' as const } : {}),
     };
   }
 }

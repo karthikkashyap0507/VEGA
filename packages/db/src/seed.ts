@@ -21,54 +21,6 @@ export interface SeedResult {
   agentB: string;
 }
 
-const ENTITLEMENTS: Array<[string, object, object]> = [
-  [
-    'free',
-    { runsPerMonth: 50, connectors: 1, seats: 1, budgetCents: 0 },
-    {
-      policyAuthoring: false, evidencePacks: false, deterministicReplay: false,
-      approvalRouting: false, dualApproval: false, sharedWorkspaces: false,
-      knowledgeBase: false, certificationLadder: false, sso: false, customerHeldKey: false,
-    },
-  ],
-  [
-    'pro',
-    { runsPerMonth: 1000, connectors: 5, seats: 1, budgetCents: 5000 },
-    {
-      policyAuthoring: false, evidencePacks: false, deterministicReplay: false,
-      approvalRouting: false, dualApproval: false, sharedWorkspaces: false,
-      knowledgeBase: true, certificationLadder: false, sso: false, customerHeldKey: false,
-    },
-  ],
-  [
-    'business',
-    { runsPerMonth: 10000, connectors: 20, seats: 50, budgetCents: 50000 },
-    {
-      policyAuthoring: false, evidencePacks: false, deterministicReplay: false,
-      approvalRouting: false, dualApproval: false, sharedWorkspaces: true,
-      knowledgeBase: true, certificationLadder: false, sso: false, customerHeldKey: false,
-    },
-  ],
-  [
-    'teams',
-    { runsPerMonth: 100000, connectors: 50, seats: 250, budgetCents: 250000 },
-    {
-      policyAuthoring: true, evidencePacks: false, deterministicReplay: false,
-      approvalRouting: true, dualApproval: true, sharedWorkspaces: true,
-      knowledgeBase: true, certificationLadder: true, sso: false, customerHeldKey: false,
-    },
-  ],
-  [
-    'enterprise',
-    { runsPerMonth: 1000000, connectors: 500, seats: 10000, budgetCents: 1000000 },
-    {
-      policyAuthoring: true, evidencePacks: true, deterministicReplay: true,
-      approvalRouting: true, dualApproval: true, sharedWorkspaces: true,
-      knowledgeBase: true, certificationLadder: true, sso: true, customerHeldKey: true,
-    },
-  ],
-];
-
 export async function seed(connectionString?: string): Promise<SeedResult> {
   const url = connectionString ?? process.env['DATABASE_URL'];
   if (!url) throw new Error('DATABASE_URL is not set');
@@ -79,13 +31,8 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
   try {
     await client.query('BEGIN');
 
-    for (const [plan, limits, exposed] of ENTITLEMENTS) {
-      await client.query(
-        `INSERT INTO plan_entitlements (plan, limits, exposed) VALUES ($1, $2, $3)
-         ON CONFLICT (plan) DO UPDATE SET limits = $2, exposed = $3, updated_at = now()`,
-        [plan, JSON.stringify(limits), JSON.stringify(exposed)],
-      );
-    }
+    // plan_entitlements rows come from migration 0003, so every environment has them —
+    // not only databases that happened to be seeded.
 
     const made: Record<string, string> = {};
 

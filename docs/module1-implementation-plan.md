@@ -125,59 +125,63 @@ isolation breaks. `DB-001` in `scripts/verify-invariants.mjs` exists to catch it
 
 ---
 
-## Step 3 — Identity: Zitadel (4–5 days)
+## Step 3 — Identity: Zitadel ✅ COMPLETE
 
-- [ ] In the Zitadel console: create a Project, then an Application (Web, PKCE),
-      redirect `http://localhost:3001/v1/oauth/callback` → paste `ZITADEL_CLIENT_ID` /
-      `ZITADEL_CLIENT_SECRET` into `.env`
-- [ ] Create a Service Account with Org Owner rights, download the key JSON to
-      `infra/docker/secrets/zitadel-sa.json` (gitignored)
-- [ ] OIDC code + PKCE flow in `services/gateway`; session cookie httpOnly + Secure + SameSite=Lax,
-      short TTL with refresh rotation
-- [ ] **Tenant resolution:** `users.idp_subject` → user → tenant. `vega.tenant_id` originates
-      **only** from verified token claims — never a header, query, or body
-- [ ] **Agent identities:** creating an agent provisions a Zitadel *machine user*. Per-run tokens,
-      ≤15 min, scoped. No long-lived agent credential exists anywhere
+- [x] Project + WEB application (private_key_jwt + PKCE) — **automated** by `pnpm idp:bootstrap`
+      (`scripts/zitadel-bootstrap.ts`) instead of console clicks; idempotent
+- [x] Provisioner service account (IAM_OWNER) + key → `infra/docker/secrets/zitadel-sa.json` (gitignored)
+- [x] OIDC code + PKCE flow in `services/gateway`; session cookie httpOnly + Secure + SameSite=Lax,
+      short TTL with refresh rotation and token-reuse detection
+- [x] **Tenant resolution:** `users.idp_subject` → user → tenant, via `auth_resolve_subject()` on a
+      verified `sub` only. Headers, query and body are ignored (asserted in `gateway.test.ts`)
+- [x] **Agent identities:** each agent is a distinct Zitadel machine user in the tenant's org.
+      Per-run tokens: `RunTokenIssuer`, ES256, ≤15 min enforced at mint **and** verify, exact scopes
 
-**DoD:** sign in end-to-end; `GET /v1/me` returns identity + roles + tenant; creating an agent
-produces a distinct machine identity visible in the Zitadel console.
+**DoD verified against live Zitadel v4.19:** browser sign-in through the Zitadel login UI →
+`GET /v1/me` returns identity + role + tenant → `POST /v1/agents` produces a machine user visible in
+Zitadel, owned by the tenant's organization.
 
-**Watch for:** Zitadel's org-per-tenant model is the reason it was chosen over Keycloak
-(TECHSTACK §12). If it fights you here, that is the signal to spike Keycloak — week 1, not month 3.
+### Decisions taken during Step 3
 
----
-
-## Step 4 — Authorization: OpenFGA (3–4 days)
-
-- [ ] Author the model from module1.md §5.4 (`user`, `agent`, `workspace`, `tenant`, `document`)
-- [ ] Create store + write model; record `OPENFGA_STORE_ID` / `OPENFGA_MODEL_ID` in `.env`
-- [ ] `packages/authz` — client, `can(user, relation, object)`, tuple writers, batch check
-- [ ] Tuple lifecycle: writing tuples on workspace/agent create, removing on delete
-- [ ] Role model from module1.md §5.3 — including `AUDITOR` as read-only across the audit plane
-
-**DoD:** OpenFGA assertion tests pass for every role × relation; a member of workspace A cannot
-`can_run_agent` in workspace B.
-
-**Watch for:** the `document` type is unused until M9, but define it now — retrofitting a type into
-a live authorization model means re-writing tuples.
+| Decision | Why |
+|---|---|
+| **Pre-tenant lookups via SECURITY DEFINER functions owned by a NOLOGIN role** | Sign-in and session lookup happen before a tenant is known. `withSystemBypassingRls` would hand every request an unisolated connection; `vega_auth` holds a role-scoped SELECT policy on exactly the columns resolution needs, and the app role can only EXECUTE the two functions (`resolver.test.ts`). |
+| **Opaque session tokens, SHA-256 at rest, rotation with a 30 s grace window** | A DB read yields nothing presentable. A rotated-away token presented after the grace window revokes the whole session (stolen-token signal). |
+| **Gateway→control identity is a signed 60 s principal assertion (ES256)** | "Tenant context only from verified claims" has to survive the plane hop. Control holds only the public key (fetched from `/.well-known/jwks.json`), so it can verify but never mint. |
+| **Invite creates the Zitadel user immediately; status flips to `active` on first sign-in** | The IdP subject is known at invite time, so first sign-in needs no email matching across tenants. |
+| **Signup runs as a `system: signup` principal admitted to one procedure** | Provisioning precedes any user or tenant. The system principal is refused by every other procedure. |
 
 ---
 
-## Step 5 — API surface (4–5 days)
+## Step 4 — Authorization: OpenFGA ✅ COMPLETE
 
-- [ ] `services/gateway` (Fastify): public `/v1`, authn, tenant resolution, rate limiting
-- [ ] `services/control` (tRPC): tenants, users, workspaces, agents
-- [ ] `services/execution` + `services/evidence`: health endpoints and plane wiring only
-- [ ] Endpoints from module1.md §7.1
-- [ ] Conventions applied everywhere: `Idempotency-Key` on mutations (24h store), RFC 9457 problem
-      details, cursor pagination, `/v1` path versioning, per-tenant rate limits, `traceparent`
-- [ ] Entitlement middleware reading `plan_entitlements` — **gates exposure only, never logic**
+- [x] Model in `packages/authz/model/model.fga` (checked-in DSL; JSON derived at load time)
+- [x] Store + model created by provisioning (dev: control creates one if `OPENFGA_STORE_ID` is unset)
+- [x] `packages/authz` — fetch-based client, `check`, `batchCheck` (errors count as denials), tuple writers
+- [x] Tuple lifecycle: grants write the DB first, revocations delete tuples first — both fail closed
+- [x] Role model from module1.md §5.3 as a capability matrix; `tenant.non_executor` makes
+      COMPLIANCE_OFFICER and AUDITOR unable to execute even when added to a workspace
 
-**DoD:** OpenAPI generated from schemas; a request without a resolved tenant context returns
-`tenant-context-missing` (a 500 invariant violation, not a 400); double-POST with the same
-idempotency key produces one effect.
+**DoD:** 44 assertion tests against a real OpenFGA, every role × relation, including a member of A
+cannot `can_run_agent` in B. ✅
 
 ---
+
+## Step 5 — API surface ✅ COMPLETE
+
+- [x] `services/gateway` (Fastify): public `/v1`, authn, tenant resolution, rate limiting
+- [x] `services/control` (tRPC): tenants, users, workspaces, agents, signup
+- [x] `services/execution` + `services/evidence`: health endpoints and plane wiring
+      (execution → evidence only via HTTP `/append`; evidence DB INSERT-only + append-only trigger)
+- [x] Endpoints from module1.md §7.1, plus `/v1/sessions` for the admin console
+- [x] Conventions: `Idempotency-Key` (24 h, per tenant+principal, claimed before execution),
+      RFC 9457 everywhere, cursor pagination, `/v1`, per-tenant **and** per-token limits (Valkey),
+      `traceparent` in / `x-trace-id` out, security headers
+- [x] Entitlement checks read `plan_entitlements` — they gate the sharing *surface*, never logic
+
+**DoD:** OpenAPI generated from the Zod schemas (`/v1/openapi.json`, `/docs`); a procedure reached
+without a principal returns `tenant-context-missing` (500); double-POST with one idempotency key
+produces one effect. ✅
 
 ## Step 6 — Web shell (5–6 days)
 
@@ -197,18 +201,15 @@ flow without touching the database.
 
 ---
 
-## Step 7 — Self-serve signup (2–3 days)
+## Step 7 — Self-serve signup ✅ COMPLETE
 
-Built now even though the SMB motion launches later — because it reworks tenant provisioning,
-which every module depends on (decision D-09).
+- [x] `POST /v1/signup` → Zitadel org + owner + tenant + default workspace + tuples, all-or-nothing by
+      compensation → connector-authorize stub → first-run stub
+- [x] `plan_entitlements` seeded for all five plans by migration `0003_entitlements.sql`
+- [x] Plan changes are data: the same `provisionTenant()` runs for every plan
 
-- [ ] Email signup → tenant + workspace provisioned automatically → connector authorize stub →
-      first run stub
-- [ ] `plan_entitlements` seeded for `free` / `pro` / `business` / `teams` / `enterprise`
-- [ ] Plan changes are data, not deploys
-
-**DoD:** a brand-new email reaches a provisioned, usable workspace in **under 5 minutes** with no
-human involvement.
+**DoD:** a brand-new email reaches a provisioned, usable workspace in seconds (`gateway.test.ts`,
+and verified live against Zitadel). ✅
 
 ---
 
