@@ -2,6 +2,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useMe } from '@/lib/me';
+import { TaintViolations, TrustedContacts } from './taint-violations';
 
 /** Session and security — module1.md §6.2. SSO configuration is an exposed surface (D-09). */
 export default function SecurityPage() {
@@ -36,9 +37,12 @@ export default function SecurityPage() {
             <li>Session cookies are httpOnly and rotate; stolen tokens are detected on reuse.</li>
             <li>Agents act with their own short-lived credentials — never a person’s.</li>
             <li>Undo and injection defense are never plan-gated.</li>
+            <li>Content from outside your organization can never choose who an agent contacts.</li>
           </ul>
         </CardContent>
       </Card>
+      <TaintViolations />
+      <TrustedContacts />
     </div>
   );
 }

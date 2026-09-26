@@ -39,6 +39,17 @@
   --risk-critical: #b42318;
   --risk-critical-bg: #fde4e1;
 
+  /*
+   * Taint semantics (module3.md §8.1): where a claim came from. Same rule as risk — colour is
+   * always paired with a label and an icon.
+   */
+  --taint-trusted: #1f7a4d;
+  --taint-trusted-bg: #e3f3ea;
+  --taint-org: #1d5fbf;
+  --taint-org-bg: #e2ecfb;
+  --taint-untrusted: #b54708;
+  --taint-untrusted-bg: #fde8d7;
+
   color-scheme: light;
 }
 
@@ -64,6 +75,12 @@
     --risk-high-bg: #3d2415;
     --risk-critical: #ff8a80;
     --risk-critical-bg: #3f1a17;
+    --taint-trusted: #6fd3a0;
+    --taint-trusted-bg: #173226;
+    --taint-org: #8ab8ff;
+    --taint-org-bg: #182a44;
+    --taint-untrusted: #ffa36b;
+    --taint-untrusted-bg: #3d2415;
     color-scheme: dark;
   }
 }
@@ -89,6 +106,12 @@
   --risk-high-bg: #3d2415;
   --risk-critical: #ff8a80;
   --risk-critical-bg: #3f1a17;
+  --taint-trusted: #6fd3a0;
+  --taint-trusted-bg: #173226;
+  --taint-org: #8ab8ff;
+  --taint-org-bg: #182a44;
+  --taint-untrusted: #ffa36b;
+  --taint-untrusted-bg: #3d2415;
   color-scheme: dark;
 }
 
@@ -113,6 +136,12 @@
   --color-risk-high-bg: var(--risk-high-bg);
   --color-risk-critical: var(--risk-critical);
   --color-risk-critical-bg: var(--risk-critical-bg);
+  --color-taint-trusted: var(--taint-trusted);
+  --color-taint-trusted-bg: var(--taint-trusted-bg);
+  --color-taint-org: var(--taint-org);
+  --color-taint-org-bg: var(--taint-org-bg);
+  --color-taint-untrusted: var(--taint-untrusted);
+  --color-taint-untrusted-bg: var(--taint-untrusted-bg);
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }

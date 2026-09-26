@@ -20,7 +20,12 @@ image:
 # key, pinned OpenFGA ids and the Zitadel service account (see services/*/src/main.ts).
 environment: production
 
-replicas: { web: 1, gateway: 1, control: 1, execution: 1, evidence: 1, web-fetch: 1 }
+replicas: { web: 1, gateway: 1, control: 1, execution: 1, evidence: 1, web-fetch: 1, extractor: 1 }
+
+# Models (module3.md §9). The extractor reaches the model through the gateway only.
+models:
+  extractor: claude-haiku-4-5-20251001
+  gatewayUrl: ""        # LiteLLM URL; empty → the provider API directly (ANTHROPIC_API_KEY)
 
 # SearXNG (web.search) — an operator-run service; empty disables search.
 search: { searxngUrl: "" }
@@ -44,6 +49,9 @@ secrets:
   execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL, EXECUTION_INTERNAL_TOKEN, LOCAL_KEK_BASE64|KMS_*, VALKEY_URL, *_CLIENT_ID/SECRET
   # web-fetch gets NO Secret at all (module2.md §10.3).
   evidence: evidence-secrets     # EVIDENCE_DATABASE_URL, EVIDENCE_WRITER_URL, EVIDENCE_APPEND_TOKEN
+  # The quarantined extractor gets its service token and a MODEL key — nothing else: no
+  # database URL, no KEK, no connector credential (module3.md §3.1).
+  extractor: extractor-secrets   # EXTRACTOR_TOKEN, ANTHROPIC_API_KEY | LITELLM_MASTER_KEY
 
 externalSecrets:
   enabled: false
@@ -73,6 +81,8 @@ network:
       - login.microsoftonline.com
       - slack.com
     mcpServers: []        # execution: CIDRs of attached MCP servers
+    # The quarantined extractor's ONLY egress: the model endpoint, by name.
+    modelGateway: [api.anthropic.com]
   # The isolated web fetcher's egress: everything public on 80/443, minus these ranges.
   webFetch:
     deniedRanges:

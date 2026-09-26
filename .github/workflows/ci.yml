@@ -103,7 +103,7 @@ jobs:
         run: pnpm --filter @vega/db test:isolation
 
   e2e:
-    name: E2E — sign in, invite, workspace, agent, connectors (real IdP, real browser)
+    name: E2E — sign in, invite, workspace, agent, connectors, plan sandbox (real IdP, real browser)
     runs-on: ubuntu-latest
     needs: [quality]
     steps:
@@ -128,14 +128,15 @@ jobs:
           echo "SIGNUP_ALLOW_PASSWORD=true" >> .env
           sed -i "s#^EXECUTION_INTERNAL_TOKEN=.*#EXECUTION_INTERNAL_TOKEN=$(openssl rand -hex 24)#" .env
           sed -i "s#^CONNECTOR_STATE_SECRET=.*#CONNECTOR_STATE_SECRET=$(openssl rand -base64 36 | tr -d '\n')#" .env
+          sed -i "s#^EXTRACTOR_TOKEN=.*#EXTRACTOR_TOKEN=$(openssl rand -hex 24)#" .env
           # A Google OAuth client id the E2E consent test can see in the (intercepted) redirect.
           sed -i "s#^GOOGLE_CLIENT_ID=.*#GOOGLE_CLIENT_ID=e2e-google-client#; s#^GOOGLE_CLIENT_SECRET=.*#GOOGLE_CLIENT_SECRET=e2e-google-secret#" .env
       - name: Start the four planes and the web app
         run: |
-          for s in evidence execution gateway control; do (pnpm --filter @vega/service-$s start > /tmp/$s.log 2>&1 &); sleep 3; done
+          for s in extractor evidence execution gateway control; do (pnpm --filter @vega/service-$s start > /tmp/$s.log 2>&1 &); sleep 3; done
           pnpm --filter @vega/web build
           (cd apps/web && GATEWAY_URL=http://localhost:3001 npx next start --port 3000 > /tmp/web.log 2>&1 &)
-          for p in 3001 3002 3003 3004; do for i in $(seq 1 60); do curl -sf localhost:$p/readyz && break; sleep 1; done; done
+          for p in 3001 3002 3003 3004 3006; do for i in $(seq 1 60); do curl -sf localhost:$p/readyz && break; sleep 1; done; done
       - run: npx playwright install --with-deps chromium
       - run: pnpm test:e2e
       - name: Service logs on failure
@@ -175,6 +176,8 @@ jobs:
         run: infra/tests/plane-separation.sh
       - name: Web-fetch isolation (SSRF at the network layer) — module2.md §13
         run: infra/tests/web-fetch-isolation.sh
+      - name: Quarantined extractor isolation — module3.md §11.3 (BLOCKING)
+        run: infra/tests/extractor-isolation.sh
 
   security:
     name: Supply chain (Trivy, OSV, Semgrep)

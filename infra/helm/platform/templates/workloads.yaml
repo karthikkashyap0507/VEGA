@@ -21,7 +21,12 @@
         "env" (list (dict "name" "SERVICE" "value" "execution")
                     (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)
                     (dict "name" "EVIDENCE_URL" "value" (printf "%s://evidence.%s.svc:3004" $scheme (include "ns.evidence" .)))
-                    (dict "name" "WEB_FETCH_URL" "value" (printf "%s://web-fetch.%s.svc:3005" $scheme (include "ns.execution" .)))))
+                    (dict "name" "WEB_FETCH_URL" "value" (printf "%s://web-fetch.%s.svc:3005" $scheme (include "ns.execution" .)))
+                    (dict "name" "EXTRACTOR_URL" "value" (printf "%s://extractor.%s.svc:3006" $scheme (include "ns.execution" .)))))
+  (dict "name" "extractor" "plane" "execution" "port" 3006 "image" .Values.image.service "secret" .Values.secrets.extractor "internal" true
+        "env" (list (dict "name" "SERVICE" "value" "extractor")
+                    (dict "name" "MODEL_EXTRACTOR" "value" .Values.models.extractor)
+                    (dict "name" "LITELLM_BASE_URL" "value" .Values.models.gatewayUrl)))
   (dict "name" "web-fetch" "plane" "execution" "port" 3005 "image" .Values.image.service "secret" "" "internal" true
         "env" (list (dict "name" "SERVICE" "value" "web-fetch")
                     (dict "name" "SEARXNG_URL" "value" .Values.search.searxngUrl)))

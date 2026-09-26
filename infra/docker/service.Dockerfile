@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # =============================================================================
-# One image per plane service: gateway | control | execution | evidence | web-fetch.
+# One image per plane service: gateway | control | execution | evidence | web-fetch | extractor.
 #
 #   docker build -f infra/docker/service.Dockerfile --build-arg SERVICE=control -t <slug>/control .
 #
@@ -29,6 +29,6 @@ ENV NODE_ENV=production SERVICE=${SERVICE}
 WORKDIR /app
 COPY --from=deps /app /app
 USER node
-EXPOSE 3001 3002 3003 3004 3005
+EXPOSE 3001 3002 3003 3004 3005 3006
 # tsx transpiles on load: the workspace packages export TypeScript sources directly.
 CMD ["sh", "-c", "exec node --import tsx services/${SERVICE}/src/main.ts"]

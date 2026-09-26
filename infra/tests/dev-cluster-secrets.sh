@@ -8,12 +8,14 @@
 #              connector credentials to call providers) and the control→execution token.
 #              NO evidence-DB credential.
 #   web-fetch  NOTHING (module2.md §10.3).
+#   extractor  its service token and a model key only (module3.md §3.1).
 #   evidence   evidence owner + INSERT-only writer URLs, the append token, a dev signing key
 set -euo pipefail
 PREFIX="${PREFIX:-vega}"
 CO="${PREFIX}-control"; XE="${PREFIX}-execution"; EV="${PREFIX}-evidence"
 APPEND_TOKEN="$(openssl rand -hex 24)"
 EXEC_TOKEN="$(openssl rand -hex 24)"
+EXTRACTOR_TOKEN="$(openssl rand -hex 24)"
 KEK="$(openssl rand -base64 32)"
 PRIMARY="postgres-primary.${CO}.svc:5432"
 EVIDB="postgres-evidence.${EV}.svc:5432"
@@ -41,7 +43,12 @@ kubectl -n "$XE" create secret generic execution-secrets --dry-run=client -o yam
   --from-literal=EXECUTION_INTERNAL_TOKEN="$EXEC_TOKEN" \
   --from-literal=LOCAL_KEK_BASE64="$KEK" \
   --from-literal=VALKEY_URL="redis://valkey.${CO}.svc:6379" \
+  --from-literal=EXTRACTOR_TOKEN="$EXTRACTOR_TOKEN" \
   --from-literal=DATABASE_APP_URL="postgresql://vega_app:vega_app_local_dev_only@${PRIMARY}/vega" | kubectl apply -f - >/dev/null
+
+# The extractor: its token and (in a real cluster) a model key. Nothing else.
+kubectl -n "$XE" create secret generic extractor-secrets --dry-run=client -o yaml \
+  --from-literal=EXTRACTOR_TOKEN="$EXTRACTOR_TOKEN" | kubectl apply -f - >/dev/null
 
 kubectl -n "$EV" create secret generic evidence-secrets --dry-run=client -o yaml \
   --from-literal=EVIDENCE_DATABASE_URL="postgresql://vega_evi:vega_evi_local_dev_only@${EVIDB}/vega_evidence" \

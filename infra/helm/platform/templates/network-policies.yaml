@@ -10,6 +10,8 @@
       evidence    execution    NONE
       execution   evidence-db  NONE
       execution   web-fetch    fetch API only (module2.md §10.3)
+      execution   extractor    extract API only (module3.md §3.1)
+      extractor   anything     NOTHING but DNS and the model endpoint — no tools, no data, no web
       web-fetch   internet     80/443 to PUBLIC addresses only — private, link-local, loopback
                                and cloud-metadata ranges are excluded at the network layer
 
@@ -201,6 +203,9 @@ spec:
     # Module 2: the web is fetched by the isolated web-fetch pod, never by this one.
     - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "web-fetch") | nindent 8 }}
       toPorts: {{- include "tcp" (list 3005) | nindent 8 }}
+    # Module 3: untrusted content is shown to a model only in the quarantined extractor.
+    - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "extractor") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3006) | nindent 8 }}
     {{- if .Values.devDependencies.enabled }}
     - toEndpoints:
         {{- include "peer" (dict "ns" $co "app" "valkey") | nindent 8 }}
@@ -247,6 +252,27 @@ spec:
           {{- end }}
         {{- end }}
       toPorts: {{- include "tcp" (list 80 443) | nindent 8 }}
+
+---
+# The quarantined extractor (docs/module3.md §3.1): "a separate deployment with no service
+# account, enforced by Cilium policy". It can be called by the interpreter and can call the
+# model — nothing else, so a fully hijacked extraction model has nowhere to send anything.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: extractor, namespace: {{ $xe }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: extractor } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 9000) | nindent 8 }}
+    - fromEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3006) | nindent 8 }}
+  {{- with .Values.network.egress.modelGateway }}
+  egress:
+    {{- include "fqdnEgress" . | nindent 4 }}
+  {{- else }}
+  egress: [{}]
+  {{- end }}
 
 # ============================================================ evidence
 ---
