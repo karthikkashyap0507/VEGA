@@ -1,0 +1,57 @@
+{{- if .Values.mtls.enabled }}
+{{- /*
+  The plane CA. A self-signed bootstrap issuer mints ONE root, held in cert-manager's
+  namespace; a CA ClusterIssuer then signs every workload certificate from it, so all four
+  planes chain to the same root and nothing else. Deployed environments swap the bootstrap
+  for a KMS/Vault-backed issuer by changing only `plane-ca`.
+*/ -}}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.prefix }}-bootstrap
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.prefix }}-plane-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: {{ .Values.prefix }} plane CA
+  secretName: {{ .Values.prefix }}-plane-ca
+  duration: 87600h
+  privateKey: { algorithm: ECDSA, size: 256 }
+  issuerRef: { name: {{ .Values.prefix }}-bootstrap, kind: ClusterIssuer, group: cert-manager.io }
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.prefix }}-plane-ca
+spec:
+  ca:
+    secretName: {{ .Values.prefix }}-plane-ca
+{{- range $wl := list (list "gateway" "control") (list "control" "control") (list "execution" "execution") (list "evidence" "evidence") }}
+{{- $name := index $wl 0 }}
+{{- $ns := printf "%s-%s" $.Values.prefix (index $wl 1) }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}-tls
+  namespace: {{ $ns }}
+spec:
+  secretName: {{ $name }}-tls
+  duration: {{ $.Values.mtls.duration }}
+  renewBefore: {{ $.Values.mtls.renewBefore }}
+  privateKey: { algorithm: ECDSA, size: 256, rotationPolicy: Always }
+  # Server AND client auth: each workload both serves mTLS and calls the next plane with it.
+  usages: [server auth, client auth, digital signature, key encipherment]
+  commonName: {{ $name }}.{{ $ns }}.svc
+  dnsNames:
+    - {{ $name }}.{{ $ns }}.svc
+    - {{ $name }}.{{ $ns }}.svc.cluster.local
+  issuerRef: { name: {{ $.Values.prefix }}-plane-ca, kind: ClusterIssuer, group: cert-manager.io }
+{{- end }}
+{{- end }}

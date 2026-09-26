@@ -46,3 +46,8 @@ infra/docker/volumes/
 # playwright
 test-results/
 playwright-report/
+
+# OpenTofu: state holds private keys and never enters git; lock files do
+**/.terraform/
+*.tfstate
+*.tfstate.*

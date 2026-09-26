@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import vega from './packages/eslint-rules/src/index.js';
 
 export default tseslint.config(
   {
@@ -40,6 +41,24 @@ export default tseslint.config(
       ],
       // Silent failure is how an ungoverned deployment reaches a customer.
       'no-empty': ['error', { allowEmptyCatch: false }],
+    },
+  },
+  {
+    // Architectural invariants (module1.md §5.6). Errors, never warnings: a failure means
+    // the architecture drifted. Scoped to production source — tests legitimately open raw
+    // connections to assert what a database ROLE can and cannot do.
+    files: ['packages/*/src/**/*.{ts,tsx}', 'services/*/src/**/*.ts', 'apps/*/src/**/*.{ts,tsx}'],
+    plugins: { vega },
+    rules: {
+      'vega/no-evidence-write-from-execution': 'error',
+      'vega/no-raw-db-pool': 'error',
+      'vega/no-eval': ['error', { allow: ['packages/taint/'] }],
+      'vega/require-tenant-context': 'error',
+      'vega/no-plan-branching': 'error',
+      // Module 2 enables this for packages/connectors when the first tool is declared.
+      'vega/require-tool-declaration': ['error', { paths: ['packages/connectors/'] }],
+      // Module 3 enables this by naming the privileged planner paths and untrusted types.
+      'vega/no-untrusted-in-privileged': ['error', { privilegedPaths: [] }],
     },
   },
   {

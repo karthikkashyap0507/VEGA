@@ -12,6 +12,7 @@ import {
 } from '@vega/authz';
 import type { IdentityAdmin, PrincipalClaims } from '@vega/idp';
 import type { ExposedFeatures, PlanLimits } from '@vega/contracts';
+import { tenantAttributes, type Span } from '@vega/telemetry';
 
 /**
  * Control-plane RPC.
@@ -38,7 +39,8 @@ export interface Principal extends PrincipalClaims {
 export interface Context {
   deps: ControlDeps;
   principal: PrincipalClaims | null;
-  /** Set when the request originated from a trusted internal caller (signup provisioning). */
+  /** The OTel span for this request; the authed middleware tags it with the tenant. */
+  span?: Span | undefined;
 }
 
 export interface AuthedContext extends Context {
@@ -160,6 +162,7 @@ const authed = t.middleware(async ({ ctx, next }) => {
   if (loaded.tenant.status !== 'active') throw new ProblemError(problems.forbidden('tenant is not active'));
   if (!loaded.ent) throw new ProblemError(problems.internal());
 
+  ctx.span?.setAttributes(tenantAttributes({ tenantId, userId: claims.userId }));
   const principal: Principal = {
     ...claims,
     role: loaded.user.role as Role,

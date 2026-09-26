@@ -1,0 +1,97 @@
+{{- /*
+  One Deployment + Service + ServiceAccount per workload. ServiceAccounts get NO RBAC at all
+  (no Role/RoleBinding exists in this chart) and no API token: nothing in any plane can read a
+  Secret through the Kubernetes API, including its own.
+*/ -}}
+{{- $scheme := include "scheme" . -}}
+{{- $w := list
+  (dict "name" "web" "plane" "experience" "port" 3000 "image" .Values.image.web "secret" "" "internal" false
+        "env" (list (dict "name" "GATEWAY_URL" "value" (printf "http://gateway.%s.svc:3001" (include "ns.control" .)))))
+  (dict "name" "gateway" "plane" "control" "port" 3001 "image" .Values.image.service "secret" .Values.secrets.control "internal" false
+        "env" (list (dict "name" "SERVICE" "value" "gateway")
+                    (dict "name" "CONTROL_URL" "value" (printf "%s://control.%s.svc:3002" $scheme (include "ns.control" .)))
+                    (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)
+                    (dict "name" "WEB_PUBLIC_URL" "value" .Values.publicUrls.web)))
+  (dict "name" "control" "plane" "control" "port" 3002 "image" .Values.image.service "secret" .Values.secrets.control "internal" true
+        "env" (list (dict "name" "SERVICE" "value" "control")
+                    (dict "name" "GATEWAY_JWKS_URL" "value" (printf "http://gateway.%s.svc:3001/.well-known/jwks.json" (include "ns.control" .)))))
+  (dict "name" "execution" "plane" "execution" "port" 3003 "image" .Values.image.service "secret" .Values.secrets.execution "internal" true
+        "env" (list (dict "name" "SERVICE" "value" "execution")
+                    (dict "name" "EVIDENCE_URL" "value" (printf "%s://evidence.%s.svc:3004" $scheme (include "ns.evidence" .)))))
+  (dict "name" "evidence" "plane" "evidence" "port" 3004 "image" .Values.image.service "secret" .Values.secrets.evidence "internal" true
+        "env" (list (dict "name" "SERVICE" "value" "evidence")))
+-}}
+{{- range $wl := $w }}
+{{- $ns := printf "%s-%s" $.Values.prefix $wl.plane }}
+{{- /* mTLS-only services probe a separate plain-HTTP health port (packages/shared health.ts). */ -}}
+{{- $probePort := ternary 9000 $wl.port (and $wl.internal $.Values.mtls.enabled) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $wl.name }}
+  namespace: {{ $ns }}
+  labels: {{- include "labels" (dict "root" $ "name" $wl.name "plane" $wl.plane) | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $wl.name }}
+  namespace: {{ $ns }}
+  labels: {{- include "labels" (dict "root" $ "name" $wl.name "plane" $wl.plane) | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/name: {{ $wl.name }} }
+  ports:
+    - { name: {{ ternary "https" "http" (and $wl.internal $.Values.mtls.enabled) }}, port: {{ $wl.port }}, targetPort: {{ $wl.port }} }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $wl.name }}
+  namespace: {{ $ns }}
+  labels: {{- include "labels" (dict "root" $ "name" $wl.name "plane" $wl.plane) | nindent 4 }}
+spec:
+  replicas: {{ index $.Values.replicas $wl.name }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: {{ $wl.name }} }
+  template:
+    metadata:
+      labels: {{- include "labels" (dict "root" $ "name" $wl.name "plane" $wl.plane) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $wl.name }}
+      {{- include "podSecurity" $ | nindent 6 }}
+      containers:
+        - name: {{ $wl.name }}
+          image: "{{ $wl.image.repository }}:{{ $wl.image.tag }}"
+          imagePullPolicy: {{ $wl.image.pullPolicy }}
+          {{- include "containerSecurity" $ | nindent 10 }}
+          ports: [{ containerPort: {{ $wl.port }} }]
+          env:
+            - { name: NODE_ENV, value: {{ $.Values.environment | quote }} }
+            - { name: HOST, value: "0.0.0.0" }
+            - { name: {{ printf "%s_PORT" (upper $wl.name) }}, value: {{ $wl.port | quote }} }
+            {{- range $wl.env }}
+            - { name: {{ .name }}, value: {{ .value | quote }} }
+            {{- end }}
+            {{- if $wl.internal }}
+            {{- include "tlsEnv" $ | nindent 12 }}
+            {{- else if eq $wl.name "gateway" }}
+            {{- include "tlsEnv" $ | nindent 12 }}
+            {{- end }}
+          {{- if $wl.secret }}
+          envFrom:
+            - secretRef: { name: {{ $wl.secret }} }
+          {{- end }}
+          readinessProbe:
+            httpGet: { path: {{ ternary "/readyz" "/login" (ne $wl.name "web") }}, port: {{ $probePort }} }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: {{ ternary "/healthz" "/login" (ne $wl.name "web") }}, port: {{ $probePort }} }
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 768Mi }
+          volumeMounts: {{- include "tlsMount" $ | nindent 12 }}
+      volumes: {{- include "tlsVolume" (dict "root" $ "name" $wl.name) | nindent 8 }}
+{{- end }}

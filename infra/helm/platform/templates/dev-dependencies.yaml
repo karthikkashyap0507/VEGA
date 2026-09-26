@@ -1,0 +1,138 @@
+{{- if .Values.devDependencies.enabled }}
+{{- /*
+  In-cluster dependencies for kind/k3s POLICY TESTS and local clusters only. Deployed
+  environments use managed Postgres (two physically separate instances), OpenFGA and Valkey,
+  reached through `network.egress` CIDRs.
+
+  Placement mirrors module1.md §3.2: the primary database sits with the control plane; the
+  evidence database sits in the evidence namespace, where only the evidence service can reach
+  it. The role scripts are the same SQL docker-compose mounts (copied into files/, checked by
+  infra/tests/plane-separation.sh).
+*/ -}}
+{{- $co := include "ns.control" . -}}
+{{- $ev := include "ns.evidence" . -}}
+{{- range $db := list (dict "name" "postgres-primary" "ns" $co "db" "vega" "user" "vega" "password" "vega_local_dev_only" "file" "files/primary-roles.sql")
+                      (dict "name" "postgres-evidence" "ns" $ev "db" "vega_evidence" "user" "vega_evi" "password" "vega_evi_local_dev_only" "file" "files/evidence-roles.sql") }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: {{ $db.name }}-init, namespace: {{ $db.ns }} }
+data:
+  01-roles.sql: |
+{{ $.Files.Get $db.file | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: {{ $db.name }}, namespace: {{ $db.ns }} }
+spec:
+  selector: { app.kubernetes.io/name: {{ $db.name }} }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: {{ $db.name }}, namespace: {{ $db.ns }} }
+spec:
+  serviceName: {{ $db.name }}
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: {{ $db.name }} } }
+  template:
+    metadata:
+      labels: {{- include "labels" (dict "root" $ "name" $db.name "plane" "data") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, fsGroup: 70, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          env:
+            - { name: POSTGRES_DB, value: {{ $db.db }} }
+            - { name: POSTGRES_USER, value: {{ $db.user }} }
+            - { name: POSTGRES_PASSWORD, value: {{ $db.password }} }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe: { exec: { command: [pg_isready, -U, {{ $db.user }}, -d, {{ $db.db }}] }, periodSeconds: 5 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+            - { name: run, mountPath: /var/run/postgresql }
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: run, emptyDir: {} }
+        - { name: init, configMap: { name: {{ $db.name }}-init } }
+{{- end }}
+{{- range $svc := list (dict "name" "openfga" "port" 8080 "image" "openfga/openfga:latest" "args" (list "run") "uid" 1000)
+                       (dict "name" "valkey" "port" 6379 "image" "valkey/valkey:8-alpine" "args" (list "valkey-server" "--save" "" "--appendonly" "no") "uid" 999) }}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: {{ $svc.name }}, namespace: {{ $co }} }
+spec:
+  selector: { app.kubernetes.io/name: {{ $svc.name }} }
+  ports: [{ port: {{ $svc.port }}, targetPort: {{ $svc.port }} }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: {{ $svc.name }}, namespace: {{ $co }} }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: {{ $svc.name }} } }
+  template:
+    metadata:
+      labels: {{- include "labels" (dict "root" $ "name" $svc.name "plane" "data") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: {{ $svc.uid }}, runAsGroup: {{ $svc.uid }}, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: {{ $svc.name }}
+          image: {{ $svc.image }}
+          args: {{ toJson $svc.args }}
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          ports: [{ containerPort: {{ $svc.port }} }]
+{{- end }}
+---
+# Each dev dependency is reachable only by the workloads that use it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: postgres-primary, namespace: {{ $co }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: postgres-primary } }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { k8s:io.kubernetes.pod.namespace: {{ $co }}, app.kubernetes.io/name: gateway }
+        - matchLabels: { k8s:io.kubernetes.pod.namespace: {{ $co }}, app.kubernetes.io/name: control }
+        - matchLabels: { k8s:io.kubernetes.pod.namespace: {{ include "ns.execution" . }}, app.kubernetes.io/name: execution }
+      toPorts: [{ ports: [{ port: "5432", protocol: TCP }] }]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: postgres-evidence, namespace: {{ $ev }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: postgres-evidence } }
+  ingress:
+    # The evidence database admits the evidence service and NOTHING else — in particular,
+    # nothing from the execution plane (invariant 1).
+    - fromEndpoints:
+        - matchLabels: { k8s:io.kubernetes.pod.namespace: {{ $ev }}, app.kubernetes.io/name: evidence }
+      toPorts: [{ ports: [{ port: "5432", protocol: TCP }] }]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: openfga, namespace: {{ $co }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: openfga } }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { k8s:io.kubernetes.pod.namespace: {{ $co }}, app.kubernetes.io/name: control }
+      toPorts: [{ ports: [{ port: "8080", protocol: TCP }] }]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: valkey, namespace: {{ $co }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: valkey } }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { k8s:io.kubernetes.pod.namespace: {{ $co }}, app.kubernetes.io/name: gateway }
+      toPorts: [{ ports: [{ port: "6379", protocol: TCP }] }]
+{{- end }}

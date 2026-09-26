@@ -73,8 +73,9 @@ services:
 
   # ------------------------------------------------------------------ Zitadel
   # Identity: organizations per tenant, machine users for agent identities.
+  # Pinned (TECHSTACK Appendix A): the IdentityAdmin contract test was verified on v4.19.1.
   zitadel:
-    image: ghcr.io/zitadel/zitadel:latest
+    image: ghcr.io/zitadel/zitadel:v4.19.1
     restart: unless-stopped
     command: >
       start-from-init
@@ -96,6 +97,16 @@ services:
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Password1!
+      # A bootstrap machine user whose PAT lands in ./secrets, so `pnpm idp:bootstrap` can
+      # create the project, app and provisioner with no console clicks (Step 3).
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: bootstrap
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Bootstrap
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: '2030-01-01T00:00:00Z'
+      ZITADEL_FIRSTINSTANCE_PATPATH: /secrets/zitadel-bootstrap.pat
+      # The v1 login UI ships in this image; login v2 would need a second container.
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: 'false'
+    volumes:
+      - ./secrets:/secrets
     depends_on:
       postgres-zitadel:
         condition: service_healthy
@@ -121,7 +132,7 @@ services:
   # Relationship-based authorization. Needed from M1 for roles; load-bearing at
   # M9 for ACL-aware retrieval, which is a relationship-graph problem.
   openfga-migrate:
-    image: openfga/openfga:latest
+    image: openfga/openfga:v1.21.0
     command: migrate
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
@@ -132,7 +143,7 @@ services:
     restart: on-failure
 
   openfga:
-    image: openfga/openfga:latest
+    image: openfga/openfga:v1.21.0
     restart: unless-stopped
     command: run
     environment:
@@ -152,7 +163,7 @@ services:
   # Full SigNoz is heavy for a laptop. Jaeger gives trace correlation in dev;
   # SigNoz/ClickHouse arrives with the deployed environment.
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.76.0
     restart: unless-stopped
     environment:
       COLLECTOR_OTLP_ENABLED: 'true'

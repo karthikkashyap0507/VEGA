@@ -25,10 +25,15 @@ export interface EvidenceAppOptions {
   writer: EvidenceWriter;
   appendToken: string;
   logger: Logger;
+  https?: Record<string, unknown>;
 }
 
 export async function buildEvidenceApp(options: EvidenceAppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, bodyLimit: 256 * 1024 });
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 256 * 1024,
+    ...(options.https ? { https: options.https } : {}),
+  }) as unknown as FastifyInstance;
 
   app.get('/healthz', async () => ({ status: 'ok' }));
   app.get('/readyz', async (_req, reply) => {

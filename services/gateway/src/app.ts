@@ -5,7 +5,7 @@ import swaggerUi from '@fastify/swagger-ui';
 import { collectDefaultMetrics, Counter, Histogram, Registry } from 'prom-client';
 import type { JSONWebKeySet } from 'jose';
 import { BRAND, problems, type Logger } from '@vega/shared';
-import { context, propagation, trace } from '@vega/telemetry';
+import { context, propagation, tenantAttributes, trace, type Span } from '@vega/telemetry';
 import type { OidcClient } from '@vega/idp';
 import type { ControlClientFactory } from './control-client.js';
 import { sendProblem, toProblem, type RouteHooks } from './http.js';
@@ -118,14 +118,14 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
 
   // ------------------------------------------------------------------ tracing
   const tracer = trace.getTracer('gateway');
-  const spans = new WeakMap<FastifyRequest, { end: () => void; started: number }>();
+  const spans = new WeakMap<FastifyRequest, { span: Span; started: number }>();
 
   app.addHook('onRequest', async (req, reply) => {
     const parent = propagation.extract(context.active(), req.headers);
     const span = tracer.startSpan(`${req.method} ${req.routeOptions.url ?? req.url}`, undefined, parent);
     const traceId = span.spanContext().traceId;
     req.traceId = traceId;
-    spans.set(req, { end: () => span.end(), started: performance.now() });
+    spans.set(req, { span, started: performance.now() });
     reply.header('x-trace-id', traceId);
   });
 
@@ -151,7 +151,8 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     const s = spans.get(req);
     if (s) {
       latency.observe({ route, method: req.method }, (performance.now() - s.started) / 1000);
-      s.end();
+      s.span.setAttribute('http.status_code', reply.statusCode);
+      s.span.end();
     }
   });
 
@@ -189,7 +190,14 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     }
 
     req.principal = { sessionId: resolved.sessionId, tenantId: resolved.tenantId, userId: resolved.userId };
-    const traceparent = req.headers['traceparent'];
+    // module1.md §12: every span carrying tenant context is tagged with it, so a trace can be
+    // filtered to one tenant and correlated with its logs (and, from M7, its audit entries).
+    const current = spans.get(req)?.span;
+    current?.setAttributes(tenantAttributes({ tenantId: resolved.tenantId, userId: resolved.userId }));
+    // Propagate THIS span as the parent of the control-plane span (W3C traceparent).
+    const carrier: Record<string, string> = {};
+    if (current) propagation.inject(trace.setSpan(context.active(), current), carrier);
+    const traceparent = carrier['traceparent'] ?? req.headers['traceparent'];
     req.control = deps.controlFor(
       {
         tenantId: resolved.tenantId,

@@ -1,0 +1,28 @@
+# Argo CD Application for the platform chart (implementation plan Step 8).
+#
+# GitOps: the cluster converges on infra/helm/platform at the tracked revision. selfHeal means
+# a hand-edited NetworkPolicy is reverted — plane separation cannot drift by kubectl.
+# Per-environment values live beside this file (values-<env>.yaml), never in the chart.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/karthikkashyap0507/VEGA.git
+    targetRevision: main
+    path: infra/helm/platform
+    helm:
+      valueFiles: [values.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      # Drift in a network policy is a security incident, not a diff to review later.
+      selfHeal: true
+    syncOptions: [ServerSideApply=true]

@@ -1,0 +1,9 @@
+# kind/k3s policy-test profile: in-cluster dependencies, development service mode (no IdP),
+# mTLS ON. Used by infra/tests/plane-separation.sh.
+environment: development
+devDependencies:
+  enabled: true
+network:
+  ingressFrom:
+    namespace: kube-system
+    podLabels: { app.kubernetes.io/name: none }

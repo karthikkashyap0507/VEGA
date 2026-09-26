@@ -1,0 +1,7 @@
+# kind cluster for the plane-separation policy test: no default CNI, so Cilium enforces policy.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+nodes:
+  - role: control-plane

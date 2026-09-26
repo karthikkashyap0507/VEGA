@@ -1,0 +1,64 @@
+# =============================================================================
+# platform chart — docs/module1.md §3.1, implementation plan Step 8.
+#
+# THE POINT OF THIS CHART is the boundary between planes, not the workloads:
+#   · four namespaces, default-deny in every one, explicit allows only
+#   · the execution plane holds NO evidence-database credential and has NO route to it
+#   · the evidence plane cannot initiate a connection to the execution plane
+#   · every hop between namespaces is mTLS with certificates from one plane CA
+# infra/tests/plane-separation.sh asserts all of it against the deployed cluster.
+# =============================================================================
+
+# Namespaces are <prefix>-experience, <prefix>-control, <prefix>-execution, <prefix>-evidence.
+prefix: vega
+
+image:
+  service: { repository: platform/service, tag: dev, pullPolicy: IfNotPresent }
+  web: { repository: platform/web, tag: dev, pullPolicy: IfNotPresent }
+
+# NODE_ENV for the services. `production` refuses to start without TLS, a principal signing
+# key, pinned OpenFGA ids and the Zitadel service account (see services/*/src/main.ts).
+environment: production
+
+replicas: { web: 1, gateway: 1, control: 1, execution: 1, evidence: 1 }
+
+publicUrls:
+  web: https://app.example.invalid
+  gateway: https://api.example.invalid
+
+mtls:
+  # cert-manager issues every workload a certificate from one plane CA (a ClusterIssuer, so
+  # all four namespaces chain to the same root). Disable only for a CNI/debug spike.
+  enabled: true
+  duration: 2160h    # 90d
+  renewBefore: 360h  # 15d
+
+# Per-plane Secrets, created out of band (External Secrets / OpenBao in deployed envs).
+# Each lives ONLY in its own plane's namespace. There is deliberately no key for the evidence
+# database anywhere under `execution`.
+secrets:
+  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*
+  execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL
+  evidence: evidence-secrets     # EVIDENCE_DATABASE_URL, EVIDENCE_WRITER_URL, EVIDENCE_APPEND_TOKEN
+
+externalSecrets:
+  enabled: false
+  secretStoreRef: { kind: ClusterSecretStore, name: openbao }
+
+# Where traffic that is not ours comes from and goes to.
+network:
+  # Pods of the ingress controller, allowed to reach web (3000) and gateway (3001).
+  ingressFrom:
+    namespace: ingress-nginx
+    podLabels: { app.kubernetes.io/name: ingress-nginx }
+  # Egress destinations outside the cluster, as CIDRs. Empty lists mean "none".
+  egress:
+    primaryDatabase: []   # control + execution
+    evidenceDatabase: []  # evidence only
+    identityProvider: []  # gateway + control (Zitadel)
+    authorization: []     # control (OpenFGA), when external
+
+# In-cluster Postgres x2, OpenFGA and Valkey — for kind/k3s policy tests and local clusters
+# ONLY. Deployed environments use managed databases reached through `network.egress`.
+devDependencies:
+  enabled: false

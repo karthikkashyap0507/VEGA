@@ -1,0 +1,13 @@
+{{- range $plane := list "experience" "control" "execution" "evidence" }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $.Values.prefix }}-{{ $plane }}
+  labels:
+    platform/plane: {{ $plane }}
+    app.kubernetes.io/part-of: {{ $.Values.prefix }}
+    # Pod Security Admission: nothing in any plane runs privileged.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+{{- end }}

@@ -9,8 +9,11 @@ import type { EvidenceAppendClient } from './evidence-append.js';
  * configured, because from M4 on "no side effect occurs before its audit entry is committed"
  * (invariant 2) and an execution plane that cannot append must not report ready.
  */
-export async function buildExecutionApp(options: { evidence?: EvidenceAppendClient }): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+export async function buildExecutionApp(options: {
+  evidence?: EvidenceAppendClient;
+  https?: Record<string, unknown>;
+}): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false, ...(options.https ? { https: options.https } : {}) }) as unknown as FastifyInstance;
   app.get('/healthz', async () => ({ status: 'ok' }));
   app.get('/readyz', async (_req, reply) => {
     const ready = Boolean(options.evidence);

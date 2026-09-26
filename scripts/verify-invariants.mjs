@@ -45,7 +45,7 @@ const checks = [
   },
   {
     id: 'EVAL-001',
-    title: 'No eval / new Function outside packages/interpreter',
+    title: 'No eval / new Function outside packages/taint',
     ref: 'PROJECT.md 10.2 invariant 5, TECHSTACK 9',
     violations: [],
   },
@@ -94,6 +94,9 @@ function inspect(file) {
     if (!isSource) return;
 
     const code = line.replace(/\/\/.*$/, '');
+    // The lint-rule package names every forbidden pattern (in messages and in fixtures that
+    // must fail). It is exempt from the code-shaped checks — never from BRAND or SEC.
+    const ruleFixtures = rel.startsWith('packages/eslint-rules/');
 
     if (/\bVEGA\b/.test(code) && rel !== 'packages/shared/src/brand.ts') {
       byId['BRAND-001'].violations.push(at);
@@ -101,13 +104,13 @@ function inspect(file) {
     if (rel.startsWith('services/execution/') && /evidence\/(write|client)|EvidenceWriter/.test(code)) {
       byId['PLANE-001'].violations.push(at);
     }
-    if (/(tenant|t)\.plan\s*===|plan\s*===\s*['"](free|pro|business|teams|enterprise)['"]/.test(code)) {
+    if (!ruleFixtures && /(tenant|t)\.plan\s*===|plan\s*===\s*['"](free|pro|business|teams|enterprise)['"]/.test(code)) {
       byId['TIER-001'].violations.push(at);
     }
-    if (/\beval\s*\(|new\s+Function\s*\(/.test(code) && !rel.startsWith('packages/interpreter/')) {
+    if (!ruleFixtures && /\beval\s*\(|new\s+Function\s*\(/.test(code) && !rel.startsWith('packages/taint/')) {
       byId['EVAL-001'].violations.push(at);
     }
-    if (/new\s+Pool\s*\(/.test(code) && !rel.startsWith('packages/db/')) {
+    if (!ruleFixtures && /new\s+Pool\s*\(/.test(code) && !rel.startsWith('packages/db/')) {
       byId['DB-001'].violations.push(at);
     }
   });

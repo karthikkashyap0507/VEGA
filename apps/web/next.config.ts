@@ -1,11 +1,10 @@
 import type { NextConfig } from 'next';
 
 /**
- * The web app is same-origin with the API: `/v1/*` is proxied to the gateway, so the session
- * cookie (httpOnly, SameSite=Lax) is sent without CORS and the browser never holds a token
- * script can read. In a cluster the ingress does the same path routing.
+ * The web app is same-origin with the API: `/v1/*` is proxied to the gateway by the route
+ * handler in src/app/v1/[...path] (runtime GATEWAY_URL), so the session cookie (httpOnly,
+ * SameSite=Lax) is sent without CORS and the browser never holds a token script can read.
  */
-const gateway = process.env['GATEWAY_URL'] ?? 'http://localhost:3001';
 
 const config: NextConfig = {
   reactStrictMode: true,
@@ -17,9 +16,6 @@ const config: NextConfig = {
   webpack(config: { resolve: { extensionAlias?: Record<string, string[]> } }) {
     config.resolve.extensionAlias = { '.js': ['.ts', '.tsx', '.js'] };
     return config;
-  },
-  async rewrites() {
-    return [{ source: '/v1/:path*', destination: `${gateway}/v1/:path*` }];
   },
   async headers() {
     return [

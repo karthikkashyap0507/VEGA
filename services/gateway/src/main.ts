@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import Valkey from 'iovalkey';
-import { createLogger, loadLocalKek } from '@vega/shared';
+import { createLogger, loadLocalKek, loadTls, mtlsFetch } from '@vega/shared';
 import { assertNotSuperuser } from '@vega/db';
 import { loadKeyFile, OidcClient, PrincipalAssertionIssuer } from '@vega/idp';
 import { initTelemetry } from '@vega/telemetry';
@@ -63,7 +63,11 @@ const sessions = new SessionService({
 const app = await buildGateway({
   logger,
   sessions,
-  controlFor: controlClientFactory(config.CONTROL_URL, issuer),
+  // The gateway presents its workload certificate to the control plane (mTLS, §3.1).
+  controlFor: controlClientFactory(config.CONTROL_URL, issuer, (() => {
+    const tls = loadTls();
+    return tls ? mtlsFetch(tls) : undefined;
+  })()),
   rateStore,
   ...(oidc ? { oidc } : {}),
   jwks: issuer.jwks,

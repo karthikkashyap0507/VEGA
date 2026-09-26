@@ -11,60 +11,73 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
+  # Local-only credentials of the CI databases. Never used outside this workflow.
+  DATABASE_URL: postgresql://vega:vega_local_dev_only@localhost:5432/vega
+  DATABASE_APP_URL: postgresql://vega_app:vega_app_local_dev_only@localhost:5432/vega
+  EVIDENCE_DATABASE_URL: postgresql://vega_evi:vega_evi_local_dev_only@localhost:5433/vega_evidence
+  EVIDENCE_WRITER_URL: postgresql://vega_evi_writer:vega_evi_writer_local@localhost:5433/vega_evidence
+  OPENFGA_API_URL: http://localhost:8081
 
 # -----------------------------------------------------------------------------
-# Gate order mirrors docs/module1.md §11 and docs/TECHSTACK.md §21.
+# Gate order mirrors docs/module1.md §11 and docs/TECHSTACK.md §21:
+#   lint → typecheck → invariants → unit/integration → tenant isolation → e2e → security
+# and the plane-separation policy test against a deployed (kind + Cilium) cluster.
 #
-# Gates belonging to steps and modules that are not yet implemented are declared
-# here as DISABLED jobs (`if: false`) ON PURPOSE. A missing gate must be visible
-# in the Actions tab rather than silently absent — that is how a module ships
-# without its blocking suite.
-#
+# Gates belonging to modules not yet implemented are declared as DISABLED jobs (`if: false`)
+# ON PURPOSE: a missing gate must be visible in the Actions tab, not silently absent.
 # Enabling a gate is part of the step that implements it, not a follow-up.
 # -----------------------------------------------------------------------------
 
 jobs:
   quality:
-    name: Lint / Typecheck / Invariants
+    name: Lint / Typecheck / Invariants / Lint-rule fixtures
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
+      - name: Lint (includes the architectural invariant rules)
+        run: pnpm lint
       - run: pnpm typecheck
-      - name: Architectural invariants (BRAND/PLANE/TIER/EVAL/DB)
+      - name: Architectural invariants (BRAND/PLANE/TIER/EVAL/SEC/DB)
         run: pnpm verify:invariants
+      - name: Lint-rule fixtures — a violating fixture must fail
+        run: pnpm vitest run packages/eslint-rules
 
   test:
-    name: Unit tests
+    name: Unit + integration (Postgres x2, OpenFGA, Valkey)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
+      postgres-evidence:
+        image: postgres:16-alpine
+        env: { POSTGRES_DB: vega_evidence, POSTGRES_USER: vega_evi, POSTGRES_PASSWORD: vega_evi_local_dev_only }
+        ports: ['5433:5432']
+        options: --health-cmd "pg_isready -U vega_evi" --health-interval 5s --health-timeout 5s --health-retries 10
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports: ['6379:6379']
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - name: OpenFGA (service containers cannot pass `run`)
+        run: docker run -d --name openfga -p 8081:8080 openfga/openfga:v1.21.0 run
+      - name: Database roles — the same files docker-compose mounts, so CI and local cannot drift
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/docker/initdb/primary/01-roles.sql
+          psql "$EVIDENCE_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/docker/initdb/evidence/01-roles.sql
+      - name: Wait for OpenFGA
+        run: for i in $(seq 1 30); do curl -sf localhost:8081/healthz && break; sleep 1; done
       - run: pnpm test
-
-  security:
-    name: Supply chain
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: fs
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-          ignore-unfixed: true
 
   tenant-isolation:
     name: Tenant isolation (BLOCKING)
@@ -72,52 +85,109 @@ jobs:
     services:
       postgres:
         image: postgres:16-alpine
-        env:
-          POSTGRES_DB: vega
-          POSTGRES_USER: vega
-          POSTGRES_PASSWORD: vega_local_dev_only
+        env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
         ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U vega" --health-interval 5s
-          --health-timeout 5s --health-retries 10
-    env:
-      DATABASE_URL: postgresql://vega:vega_local_dev_only@localhost:5432/vega
-      # The suite MUST run as the least-privilege role. PostgreSQL bypasses RLS for
-      # superusers even with FORCE, so running it as the owner would pass and prove nothing.
-      DATABASE_APP_URL: postgresql://vega_app:vega_app_local_dev_only@localhost:5432/vega
+        options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - name: Create the least-privilege application role
-        # Same file docker-compose mounts as an initdb script locally, so CI and local
-        # development cannot drift on what the app role is allowed to do.
+        # The suite MUST run as vega_app: PostgreSQL bypasses RLS for superusers even with
+        # FORCE, so running it as the owner would pass and prove nothing.
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/docker/initdb/primary/01-roles.sql
       - run: pnpm db:migrate
-      - name: Adversarial cross-tenant suite
+      - name: Adversarial cross-tenant suite + schema coverage + pre-tenant resolver
         run: pnpm --filter @vega/db test:isolation
 
-  # ---------------------------------------------------------------------------
-  # Not yet implemented. Each line names the step or module that turns it on.
-  # ---------------------------------------------------------------------------
-
   e2e:
-    name: 'E2E — sign in, invite, workspace, agent (enable in M1 Step 6)'
+    name: E2E — sign in, invite, workspace, agent (real IdP, real browser)
     runs-on: ubuntu-latest
-    if: false
+    needs: [quality]
     steps:
-      - run: echo "Playwright suite lands with the web shell."
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Local stack (Postgres x2, Zitadel, OpenFGA, Valkey)
+        run: |
+          chmod 0777 infra/docker/secrets
+          docker compose -f infra/docker/docker-compose.yml up -d postgres postgres-evidence postgres-zitadel zitadel openfga-migrate openfga valkey
+          for i in $(seq 1 90); do [ -s infra/docker/secrets/zitadel-bootstrap.pat ] && curl -sf localhost:8080/debug/healthz && break; sleep 2; done
+      - name: Identity bootstrap (project, private_key_jwt app, provisioner)
+        run: pnpm idp:bootstrap
+      - name: Environment
+        run: |
+          cp .env.example .env
+          sed -i "s#^SESSION_SECRET=.*#SESSION_SECRET=$(openssl rand -base64 48 | tr -d '\n')#" .env
+          sed -i "s#^LOCAL_KEK_BASE64=.*#LOCAL_KEK_BASE64=$(openssl rand -base64 32)#" .env
+          echo "EVIDENCE_APPEND_TOKEN=$(openssl rand -hex 24)" >> .env
+          echo "SIGNUP_ALLOW_PASSWORD=true" >> .env
+      - name: Start the four planes and the web app
+        run: |
+          for s in evidence execution gateway control; do (pnpm --filter @vega/service-$s start > /tmp/$s.log 2>&1 &); sleep 3; done
+          pnpm --filter @vega/web build
+          (cd apps/web && GATEWAY_URL=http://localhost:3001 npx next start --port 3000 > /tmp/web.log 2>&1 &)
+          for p in 3001 3002 3003 3004; do for i in $(seq 1 60); do curl -sf localhost:$p/readyz && break; sleep 1; done; done
+      - run: npx playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - name: Service logs on failure
+        if: failure()
+        run: tail -n 100 /tmp/*.log
 
   plane-separation:
-    name: 'Plane separation policy — P0 (enable in M1 Step 8)'
+    name: Plane separation policy — P0 (kind + Cilium)
     runs-on: ubuntu-latest
-    if: false
+    needs: [quality]
     steps:
-      - run: echo "Runs against a deployed cluster. Application code cannot enforce invariant 1."
+      - uses: actions/checkout@v4
+      - name: kind cluster without a default CNI (Cilium owns policy)
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: planes
+          config: infra/tests/kind-config.yaml
+      - uses: azure/setup-helm@v4
+      - name: Cilium + cert-manager
+        run: |
+          helm repo add cilium https://helm.cilium.io && helm repo add jetstack https://charts.jetstack.io
+          helm install cilium cilium/cilium --version 1.18.3 -n kube-system --set ipam.mode=kubernetes --set operator.replicas=1 --wait
+          helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --version v1.18.2 --set crds.enabled=true --wait
+      - name: Build and load images
+        run: |
+          docker build -f infra/docker/service.Dockerfile -t platform/service:dev .
+          docker build -f infra/docker/web.Dockerfile -t platform/web:dev .
+          kind load docker-image platform/service:dev platform/web:dev --name planes
+      - name: Deploy the platform chart (policy-test profile)
+        run: |
+          infra/tests/dev-cluster-secrets.sh
+          helm upgrade --install platform infra/helm/platform -f infra/helm/platform/values-dev-cluster.yaml
+          kubectl wait --for=condition=available --timeout=300s deploy --all -n vega-control
+          kubectl wait --for=condition=available --timeout=300s deploy --all -n vega-execution
+          kubectl wait --for=condition=available --timeout=300s deploy --all -n vega-evidence
+      - name: Plane separation policy test
+        run: infra/tests/plane-separation.sh
+
+  security:
+    name: Supply chain (Trivy, OSV, Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with: { scan-type: fs, severity: 'HIGH,CRITICAL', exit-code: '1', ignore-unfixed: true }
+      - name: OSV-Scanner (lockfile)
+        uses: google/osv-scanner-action/osv-scanner-action@v2.0.2
+        with: { scan-args: '--lockfile=pnpm-lock.yaml' }
+      - name: Semgrep
+        uses: semgrep/semgrep-action@v1
+        with: { config: 'p/typescript p/nodejs p/secrets' }
+
+  # ---------------------------------------------------------------------------
+  # Not yet implemented. Each line names the module that turns it on.
+  # ---------------------------------------------------------------------------
 
   taint-soundness:
     name: 'Taint soundness — BLOCKING (enable in M3)'

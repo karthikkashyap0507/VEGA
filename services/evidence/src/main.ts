@@ -1,4 +1,4 @@
-import { createLogger } from '@vega/shared';
+import { createLogger, internalServerTls, loadTls, startHealthServer } from '@vega/shared';
 import { EvidenceWriter, migrateEvidence } from '@vega/db/evidence';
 import { buildEvidenceApp } from './app.js';
 
@@ -12,7 +12,11 @@ if (!ownerUrl || !writerUrl || !appendToken) {
 
 await migrateEvidence(ownerUrl);
 const writer = new EvidenceWriter(writerUrl);
-const app = await buildEvidenceApp({ writer, appendToken, logger });
+const tls = loadTls();
+if (!tls) logger.warn('DEV: plain HTTP; in a cluster evidence accepts only mTLS clients');
+const app = await buildEvidenceApp({ writer, appendToken, logger, ...(tls ? { https: internalServerTls(tls) } : {}) });
 const port = Number(process.env['EVIDENCE_PORT'] ?? 3004);
 await app.listen({ port, host: process.env['HOST'] ?? '127.0.0.1' });
 logger.info({ port }, 'evidence plane listening (append-only)');
+// Probes cannot present client certificates; with mTLS on, health lives on its own port.
+if (tls) startHealthServer(Number(process.env['HEALTH_PORT'] ?? 9000), () => writer.ping());

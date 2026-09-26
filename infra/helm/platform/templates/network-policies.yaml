@@ -1,0 +1,202 @@
+{{- /*
+  =============================================================================
+  Plane separation as a NETWORK control — docs/module1.md §3.1. "Separation is enforced by
+  network policy and IAM, not by application code."
+
+      From        To           Allowed
+      experience  control      gateway only
+      control     execution    execution API only
+      execution   evidence     evidence /append port only (the service exposes nothing else)
+      evidence    execution    NONE
+      execution   evidence-db  NONE
+
+  Every namespace starts at default-deny for ingress AND egress; each rule below opens one
+  flow, named for what it is for. infra/tests/plane-separation.sh asserts the table.
+  =============================================================================
+*/ -}}
+{{- $ex := include "ns.experience" . -}}
+{{- $co := include "ns.control" . -}}
+{{- $xe := include "ns.execution" . -}}
+{{- $ev := include "ns.evidence" . -}}
+{{- define "peer" -}}
+- matchLabels:
+    k8s:io.kubernetes.pod.namespace: {{ .ns }}
+    app.kubernetes.io/name: {{ .app }}
+{{- end -}}
+{{- define "tcp" -}}
+- ports:
+{{- range . }}
+    - { port: {{ . | quote }}, protocol: TCP }
+{{- end }}
+{{- end -}}
+{{- define "cidrs" -}}
+{{- range . }}
+    - {{ . }}
+{{- end }}
+{{- end -}}
+
+{{- range $ns := list $ex $co $xe $ev }}
+---
+# Default deny, both directions. An empty rule selects no peer.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: default-deny, namespace: {{ $ns }} }
+spec:
+  endpointSelector: {}
+  ingress: [{}]
+  egress: [{}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: allow-dns, namespace: {{ $ns }} }
+spec:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels: { k8s:io.kubernetes.pod.namespace: kube-system, k8s-app: kube-dns }
+      toPorts:
+        - ports: [{ port: "53", protocol: UDP }, { port: "53", protocol: TCP }]
+{{- end }}
+
+# ============================================================ experience
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: web, namespace: {{ $ex }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: web } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 3000) | nindent 8 }}
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .Values.network.ingressFrom.namespace }}
+            {{- toYaml .Values.network.ingressFrom.podLabels | nindent 12 }}
+      toPorts: {{- include "tcp" (list 3000) | nindent 8 }}
+  egress:
+    - toEndpoints: {{- include "peer" (dict "ns" $co "app" "gateway") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3001) | nindent 8 }}
+
+# ============================================================ control
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: gateway, namespace: {{ $co }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: gateway } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 3001) | nindent 8 }}
+    - fromEndpoints:
+        {{- include "peer" (dict "ns" $ex "app" "web") | nindent 8 }}
+        {{- include "peer" (dict "ns" $co "app" "control") | nindent 8 }}
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .Values.network.ingressFrom.namespace }}
+            {{- toYaml .Values.network.ingressFrom.podLabels | nindent 12 }}
+      toPorts: {{- include "tcp" (list 3001) | nindent 8 }}
+  egress:
+    - toEndpoints: {{- include "peer" (dict "ns" $co "app" "control") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3002) | nindent 8 }}
+    {{- if .Values.devDependencies.enabled }}
+    - toEndpoints:
+        {{- include "peer" (dict "ns" $co "app" "postgres-primary") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    - toEndpoints:
+        {{- include "peer" (dict "ns" $co "app" "valkey") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 6379) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.primaryDatabase }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.identityProvider }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 443) | nindent 8 }}
+    {{- end }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: control, namespace: {{ $co }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: control } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 9000) | nindent 8 }}
+    - fromEndpoints: {{- include "peer" (dict "ns" $co "app" "gateway") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3002) | nindent 8 }}
+  egress:
+    - toEndpoints: {{- include "peer" (dict "ns" $co "app" "gateway") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3001) | nindent 8 }}
+    - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3003) | nindent 8 }}
+    {{- if .Values.devDependencies.enabled }}
+    - toEndpoints:
+        {{- include "peer" (dict "ns" $co "app" "postgres-primary") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    - toEndpoints:
+        {{- include "peer" (dict "ns" $co "app" "openfga") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 8080) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.primaryDatabase }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.identityProvider }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 443) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.authorization }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 443 8080) | nindent 8 }}
+    {{- end }}
+
+# ============================================================ execution
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: execution, namespace: {{ $xe }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: execution } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 9000) | nindent 8 }}
+    - fromEndpoints: {{- include "peer" (dict "ns" $co "app" "control") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3003) | nindent 8 }}
+  egress:
+    # INVARIANT 1: the ONLY route into the evidence plane — its service port, nothing else.
+    # There is no rule to the evidence database; default-deny makes that connection impossible.
+    - toEndpoints: {{- include "peer" (dict "ns" $ev "app" "evidence") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3004) | nindent 8 }}
+    {{- if .Values.devDependencies.enabled }}
+    - toEndpoints:
+        {{- include "peer" (dict "ns" $co "app" "postgres-primary") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.primaryDatabase }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    {{- end }}
+
+# ============================================================ evidence
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: evidence, namespace: {{ $ev }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: evidence } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 9000) | nindent 8 }}
+    - fromEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3004) | nindent 8 }}
+  egress:
+    # No rule toward the execution plane exists: evidence cannot initiate that connection.
+    {{- if .Values.devDependencies.enabled }}
+    - toEndpoints:
+        {{- include "peer" (dict "ns" $ev "app" "postgres-evidence") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.evidenceDatabase }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    {{- end }}

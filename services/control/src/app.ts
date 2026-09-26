@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { fastifyTRPCPlugin, type FastifyTRPCPluginOptions } from '@trpc/server/adapters/fastify';
 import { TRPCError } from '@trpc/server';
 import { PrincipalAssertionError, type PrincipalAssertionVerifier, type PrincipalClaims } from '@vega/idp';
+import { context, propagation, trace, type Span } from '@vega/telemetry';
 import { appRouter, type AppRouter } from './routers/index.js';
 import type { Context, ControlDeps } from './trpc.js';
 
@@ -11,6 +12,8 @@ export const PRINCIPAL_HEADER = 'x-principal-assertion';
 export interface ControlAppOptions {
   deps: ControlDeps;
   verifier: PrincipalAssertionVerifier;
+  /** mTLS server options (packages/shared internalServerTls). Absent: plain HTTP, dev only. */
+  https?: Record<string, unknown>;
 }
 
 /**
@@ -21,7 +24,25 @@ export interface ControlAppOptions {
  * assertion that is verified against the gateway's public key before any procedure runs.
  */
 export async function buildControlApp(options: ControlAppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 1024 * 1024,
+    ...(options.https ? { https: options.https } : {}),
+  }) as unknown as FastifyInstance;
+
+  // Continue the gateway's trace: the span for this procedure is a child of the gateway span
+  // named in `traceparent`, so one trace covers browser → gateway → control (module1.md §12).
+  const tracer = trace.getTracer('control');
+  const spans = new WeakMap<object, Span>();
+  app.addHook('onRequest', async (req) => {
+    const parent = propagation.extract(context.active(), req.headers);
+    spans.set(req.raw, tracer.startSpan(`trpc ${req.url.split('?')[0]?.replace('/trpc/', '') ?? ''}`, undefined, parent));
+  });
+  app.addHook('onResponse', async (req, reply) => {
+    const span = spans.get(req.raw);
+    span?.setAttribute('http.status_code', reply.statusCode);
+    span?.end();
+  });
 
   app.get('/healthz', async () => ({ status: 'ok' }));
   app.get('/readyz', async () => ({ status: 'ready' }));
@@ -43,7 +64,7 @@ export async function buildControlApp(options: ControlAppOptions): Promise<Fasti
             throw error;
           }
         }
-        return { deps: options.deps, principal };
+        return { deps: options.deps, principal, span: spans.get(req.raw) };
       },
       onError: ({ error, path }) => {
         if (error.code === 'INTERNAL_SERVER_ERROR') {

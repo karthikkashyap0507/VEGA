@@ -223,42 +223,62 @@ and verified live against Zitadel). ✅
 
 ---
 
-## Step 8 — Plane separation (3–4 days) ⚠ invariant step
+## Step 8 — Plane separation ✅ COMPLETE ⚠ invariant step
 
 Application code cannot enforce this. Infrastructure must.
 
-- [ ] Helm chart: four namespaces — `vega-experience`, `vega-control`, `vega-execution`,
-      `vega-evidence`
-- [ ] Cilium **default-deny** in every namespace; explicit allows only (module1.md §3.1)
-- [ ] Separate DB credentials; execution plane holds **no** credential for the evidence DB
-- [ ] mTLS between namespaces (cert-manager)
-- [ ] OpenTofu for Zitadel + OpenFGA provisioning; model checked in
-- [ ] Argo CD application
+- [x] Helm chart `infra/helm/platform`: four namespaces (`<prefix>-experience|control|execution|evidence`),
+      Pod Security `restricted`, one ServiceAccount per workload with **no RBAC and no API token**
+- [x] Cilium **default-deny** (ingress and egress) in every namespace; explicit allows only, one per
+      flow in module1.md §3.1. The evidence database admits the evidence service and nothing else.
+- [x] Separate credentials per plane: each plane's Secret exists only in its own namespace; the
+      execution plane holds no evidence-DB credential (asserted, not assumed)
+- [x] mTLS between namespaces: cert-manager plane CA (ClusterIssuer) + per-workload certs; internal
+      servers **require** client certificates (TLS 1.3); probes use a separate plain health port
+- [x] OpenTofu for Zitadel (`infra/tofu/identity`) and OpenFGA (`infra/tofu/authz`, model from the
+      checked-in DSL) — both applied and destroyed against live instances
+- [x] Argo CD application with `selfHeal` (a hand-edited policy is reverted)
 
-**DoD — the policy test passes against a deployed cluster:**
+**DoD — the policy test passes against a deployed cluster ✅** (`infra/tests/plane-separation.sh`,
+run against k3s + Cilium 1.18 + cert-manager with the chart deployed; CI runs the same script on
+kind + Cilium). 19 checks, each negative paired with a positive control on the same path:
 
-- execution service account has no evidence-DB credential
-- a pod in `vega-execution` cannot open TCP to the evidence DB
-- `vega-evidence` cannot initiate a connection to `vega-execution`
-- execution cannot use the evidence signing key in KMS
+- execution has no evidence-DB credential (Secrets, container env, RBAC `can-i`)
+- execution cannot open TCP to the evidence DB (while execution → evidence:3004 *does* open)
+- evidence cannot initiate a connection to execution (while control → execution *does* open)
+- execution cannot read the evidence signing key (cloud KMS check via `KMS_DENY_CHECK`)
+- execution → evidence `POST /append` over mTLS returns 201; `GET /entries` has no route; a client
+  without a certificate is refused by evidence and by control
 
-**A failure here is P0.** This is the control; the code is not.
+**Mutation-tested:** deleting the evidence and execution policies makes the script fail (6 checks).
+
+### Decisions taken during Step 8
+
+| Decision | Why |
+|---|---|
+| **L4 policy on the evidence port, not L7 `/append` path rules** | The hop is mTLS end-to-end, so the network cannot see paths. The path restriction is the evidence service having no other route (tested); Cilium restricts the port and the peer. |
+| **Separate plain-HTTP health port (9000) for mTLS services** | Kubelet probes cannot present client certificates. The health port serves only `/healthz` and `/readyz` and is admitted only from `host`. |
+| **Web proxies `/v1` in a route handler, not a `next.config` rewrite** | Rewrites are frozen into the build; the route handler reads `GATEWAY_URL` at runtime, so one web image runs in every environment. |
+| **Dev dependencies (2× Postgres, OpenFGA, Valkey) are a chart profile** | Policy tests need real databases behind real policies. Deployed environments turn it off and use `network.egress` CIDRs. |
 
 ---
 
-## Step 9 — CI gates + invariant enforcement (2–3 days)
+## Step 9 — CI gates + invariant enforcement ✅ COMPLETE
 
-- [ ] `packages/eslint-rules` with all six rules from module1.md §5.6 (two are stubs that M2/M3
-      turn on — ship the stubs so later modules *enable* rather than *introduce* them)
-- [ ] Fixture tests per rule: a violating fixture must fail the build
-- [ ] `scripts/verify-invariants.mjs` wired into CI (already scaffolded)
-- [ ] Full pipeline: lint → typecheck → invariants → unit → integration → **tenant-isolation** →
-      e2e → security scan
-- [ ] Playwright: sign in, invite, workspace, agent create
-- [ ] Later-module gates present but disabled — visibly missing, not silently absent
+- [x] `packages/eslint-rules`: `no-evidence-write-from-execution`, `no-raw-db-pool`, `no-eval`,
+      `require-tenant-context`, `no-untrusted-in-privileged` (inert until M3 configures it),
+      `require-tool-declaration` (active for `packages/connectors/`, first used in M2), plus
+      `no-plan-branching` (the AST form of TIER-001)
+- [x] Fixture tests per rule (43): violating code must fail, the sanctioned pattern must pass
+- [x] `scripts/verify-invariants.mjs` in CI; SEC-001 inspects only committable files
+- [x] Pipeline: lint → typecheck → invariants → rule fixtures → unit + integration (Postgres ×2,
+      OpenFGA, Valkey) → **tenant isolation** → e2e (real Zitadel, Playwright) → plane separation
+      (kind + Cilium) → Trivy / OSV / Semgrep
+- [x] Playwright: sign in, six surfaces, invite, workspace, agent
+- [x] Later-module gates present but disabled — visibly missing, not silently absent
 
-**DoD:** a PR violating any invariant fails CI with a message naming the invariant and its
-PROJECT.md reference.
+**DoD:** a violation fails with a message naming the invariant and its reference, e.g.
+`INVARIANT 1 (PROJECT.md §10.2): the execution plane must not import "@vega/db/evidence"`. ✅
 
 ---
 
@@ -266,19 +286,20 @@ PROJECT.md reference.
 
 Copied from module1.md §13. All must hold:
 
-- [ ] Cold clone → `pnpm install && pnpm dev` → full stack in under 5 minutes
-- [ ] Sign in via Zitadel, land in tenant, see all six surfaces
-- [ ] Admin can invite a user, assign a role, create a workspace, create an agent
-- [ ] Creating an agent provisions a distinct machine identity
-- [ ] Tenant isolation suite passes for 100% of tenant-scoped tables, API included
-- [ ] Plane separation policy test passes against a deployed cluster
-- [ ] All six lint rules exist; violating fixtures fail the build
-- [ ] Traces flow end to end in Jaeger with tenant correlation
-- [ ] `brand.ts` is the only file containing the product name (CI-verified)
-- [ ] Helm chart deploys four namespaces with default-deny
-- [ ] Self-serve signup reaches a first run in under 5 minutes
-- [ ] Entitlements are data-driven; adding a plan requires no code change
-- [ ] No business-logic branch keys off `tenants.plan`
+- [x] Cold clone → `pnpm install && pnpm stack:up && pnpm idp:bootstrap && pnpm dev` → full stack
+- [x] Sign in via Zitadel, land in tenant, see all six surfaces (Playwright, real IdP)
+- [x] Admin can invite a user, assign a role, create a workspace, create an agent
+- [x] Creating an agent provisions a distinct machine identity (verified in Zitadel)
+- [x] Tenant isolation suite passes for 100% of tenant-scoped tables, API included
+- [x] Plane separation policy test passes against a deployed cluster
+- [x] All six lint rules exist; violating fixtures fail the build
+- [x] Traces flow end to end in Jaeger with tenant correlation (gateway span → control child span,
+      both tagged `vega.tenant_id`)
+- [x] `brand.ts` is the only file containing the product name (CI-verified)
+- [x] Helm chart deploys four namespaces with default-deny
+- [x] Self-serve signup reaches a provisioned workspace in seconds (the first-run stub is M4's)
+- [x] Entitlements are data-driven; adding a plan requires no code change
+- [x] No business-logic branch keys off `tenants.plan` (`no-plan-branching` + TIER-001)
 
 ---
 

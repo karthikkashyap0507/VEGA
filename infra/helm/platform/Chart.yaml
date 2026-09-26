@@ -1,0 +1,8 @@
+apiVersion: v2
+name: platform
+description: >
+  The four planes (experience, control, execution, evidence) as four namespaces with
+  Cilium default-deny, mTLS between them, and per-plane credentials (docs/module1.md §3).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

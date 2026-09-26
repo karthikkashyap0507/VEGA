@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { createLogger } from '@vega/shared';
+import { createLogger, internalServerTls, loadTls, startHealthServer } from '@vega/shared';
 import { assertNotSuperuser, migrate } from '@vega/db';
 import { FgaClient, fgaAdmin, modelToJson } from '@vega/authz';
 import { InMemoryIdentityAdmin, loadKeyFile, PrincipalAssertionVerifier, ZitadelAdmin, type IdentityAdmin } from '@vega/idp';
@@ -50,10 +50,18 @@ const fga = new FgaClient({ apiUrl: fgaUrl, storeId, modelId, ...(env['OPENFGA_A
 const jwksUrl = new URL(env['GATEWAY_JWKS_URL'] ?? 'http://localhost:3001/.well-known/jwks.json');
 const verifier = new PrincipalAssertionVerifier(jwksUrl, 'gateway', 'control');
 
+const tls = loadTls();
+if (!tls) {
+  if (production) throw new Error('TLS_* is required in production: the control plane only serves mTLS');
+  logger.warn('DEV: serving plain HTTP; in a cluster the control plane requires mTLS client certificates');
+}
 const app = await buildControlApp({
   deps: { identity, fga, logger, returnInviteCodes: !production },
   verifier,
+  ...(tls ? { https: internalServerTls(tls) } : {}),
 });
 const port = Number(env['CONTROL_PORT'] ?? 3002);
 await app.listen({ port, host: env['HOST'] ?? '127.0.0.1' });
 logger.info({ port }, 'control plane listening');
+// Probes cannot present client certificates; with mTLS on, health lives on its own port.
+if (tls) startHealthServer(Number(process.env['HEALTH_PORT'] ?? 9000), async () => true);
