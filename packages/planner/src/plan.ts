@@ -33,18 +33,26 @@ export function parsePlannerOutput(raw: string): Program {
 export interface PlanOptions {
   llm: LlmClient;
   model: string;
-  /** Static validation (the interpreter's validator bound to this tenant's declarations). */
-  validate: (p: Program) => { valid: boolean; errors: ValidationIssue[] };
+  /** Static validation (the interpreter's validator bound to this tenant's declarations, plus C2's bounds). */
+  validate: (p: Program) => { valid: boolean; errors: ValidationIssue[] } | Promise<{ valid: boolean; errors: ValidationIssue[] }>;
   maxAttempts?: number;
 }
 
-export async function plan(input: PlannerInput, opts: PlanOptions): Promise<{ program: Program; attempts: number; raw: string }> {
+export async function plan(input: PlannerInput, opts: PlanOptions): Promise<{ program: Program; attempts: number; raw: string; usage: { inputTokens: number; outputTokens: number }; model: string }> {
+  const usage = { inputTokens: 0, outputTokens: 0 };
   const attempts: Array<{ raw: string; errors: Array<{ code: string; message: string }> }> = [];
   const max = Math.min(opts.maxAttempts ?? 2, 2);
   let feedback: PlannerInput['feedback'];
   for (let i = 0; i < max; i++) {
     const prompt = buildPlannerPrompt({ ...input, ...(feedback ? { feedback } : {}) });
     const res = await opts.llm.complete({ model: opts.model, system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 4_000, temperature: 0 });
+    usage.inputTokens += res.usage.inputTokens;
+    usage.outputTokens += res.usage.outputTokens;
+    if (res.text.startsWith('CANNOT_PLAN:')) {
+      // An explicit refusal is final: asking again returns the same answer.
+      attempts.push({ raw: res.text, errors: [{ code: 'CANNOT_PLAN', message: res.text.slice(12).trim() }] });
+      break;
+    }
     let program: Program;
     try {
       program = parsePlannerOutput(res.text);
@@ -54,8 +62,8 @@ export async function plan(input: PlannerInput, opts: PlanOptions): Promise<{ pr
       feedback = errors;
       continue;
     }
-    const v = opts.validate(program);
-    if (v.valid) return { program, attempts: i + 1, raw: res.text };
+    const v = await opts.validate(program);
+    if (v.valid) return { program, attempts: i + 1, raw: res.text, usage, model: res.model };
     const errors = v.errors.map((e) => ({ code: e.code, message: e.message, ...(e.nodeId ? { nodeId: e.nodeId } : {}) }));
     attempts.push({ raw: res.text, errors });
     feedback = errors;

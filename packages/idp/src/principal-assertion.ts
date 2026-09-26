@@ -38,11 +38,12 @@ export interface PrincipalClaims {
   /** W3C trace id, so control-plane logs correlate without re-deriving it. */
   traceId?: string;
   /**
-   * A system principal acts for no user and no tenant. The only one that exists is `signup`:
-   * provisioning a tenant necessarily happens before either does. The control plane admits
+   * A system principal acts for no user and no tenant. `signup`: provisioning a tenant
+   * necessarily happens before either does. `webhook` (Module 4): an inbound agent trigger,
+   * authenticated by the agent's own webhook secret, not by a session. The control plane admits
    * system principals to exactly the procedures that declare them, and nothing else.
    */
-  system?: 'signup';
+  system?: 'signup' | 'webhook';
 }
 
 /** Sentinel ids for system principals. Never valid uuids, so withTenant refuses them. */
@@ -139,7 +140,7 @@ export class PrincipalAssertionVerifier {
       userId: payload.sub,
       ...(typeof payload['sid'] === 'string' ? { sessionId: payload['sid'] } : {}),
       ...(typeof payload['trc'] === 'string' ? { traceId: payload['trc'] } : {}),
-      ...(payload['sys'] === 'signup' ? { system: 'signup' as const } : {}),
+      ...(payload['sys'] === 'signup' ? { system: 'signup' as const } : payload['sys'] === 'webhook' ? { system: 'webhook' as const } : {}),
     };
   }
 }

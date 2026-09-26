@@ -314,7 +314,8 @@ export class ConnectorRuntime {
           }
           if (claim.kind === 'in_flight') {
             key = undefined; // not ours to finish
-            throw new ToolError('CONFLICT', 'an invocation with this key is already in flight', { committed: 'no' });
+            // Not "nothing happened": an unfinished claim means the effect may exist (module4.md §8.4).
+            throw new ToolError('OUTCOME_UNKNOWN', 'an invocation with this key was started and never finished; its outcome is unknown', { committed: 'maybe' });
           }
           if (claim.kind === 'mismatch') {
             key = undefined;

@@ -38,6 +38,16 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'taint_violations', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'programs', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'trusted_contacts', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'runs', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'task_nodes', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'actions', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'replans', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'agent_versions', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'conversations', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'conversation_messages', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'trigger_fires', idColumn: 'agent_id', tenantColumn: 'tenant_id' },
+  { table: 'webhook_endpoints', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'webhook_deliveries', idColumn: 'id', tenantColumn: 'tenant_id' },
 ];
 
 let appPool: pg.Pool;

@@ -1,9 +1,16 @@
-import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { Cron } from 'croner';
 import { z } from 'zod';
 import { problems } from '@vega/shared';
 import { schema } from '@vega/db';
-import { AgentStatus, CreateAgent, PageQuery, UpdateAgent, Uuid } from '@vega/contracts';
+import { AgentSpec, AgentStatus, CreateAgent, PageQuery, UpdateAgent, Uuid } from '@vega/contracts';
+import { callBound, parse, ParseError, print } from '@vega/dsl';
+import type { LoadedRun } from '@vega/runs';
+import { bindConnectors, hashSecret, loadAgentSpec } from '../agent/coordinator.js';
+import { understand } from '../agent/intent.js';
+import { planRun } from '../agent/planning.js';
+import { agentCore, refusal } from './runs.js';
 import { agentCreatedTuples, agentOwnerChangeTuples, fga, hasCapability } from '@vega/authz';
 import {
   ProblemError,
@@ -20,7 +27,7 @@ import { afterCursor, decodeCursor, emitEvent, isUniqueViolation, newestFirst, p
  * user, distinct from its owner and from every other agent. A run later acts as the agent
  * on behalf of a user, and both identities land on every receipt (M7).
  *
- * An agent is created in `draft` and cannot become `active` until Module 4 gives it a spec.
+ * An agent is created in `draft` and becomes `active` when its first spec is saved (Module 4).
  */
 
 async function loadAgent(ctx: AuthedContext, id: string) {
@@ -181,7 +188,7 @@ export const agentsRouter = router({
 
     if (input.status === 'active' && !hasSpec(current.specJson)) {
       throw new ProblemError(
-        problems.preconditionFailed('an agent cannot be activated before it has a spec (Module 4)'),
+        problems.preconditionFailed('an agent cannot be activated before it has a spec: save one in Agent Studio'),
       );
     }
     if (input.status === 'archived') {
@@ -227,6 +234,140 @@ export const agentsRouter = router({
       await ctx.deps.fga.write(t.writes, t.deletes);
     }
     return toAgent(row);
+  }),
+
+  // ------------------------------------------------------------------ Agent Studio (Module 4)
+  spec: procedure.input(z.object({ id: Uuid })).query(async ({ ctx, input }) => {
+    requireCapability(ctx, 'agents.read');
+    const row = await loadAgent(ctx, input.id);
+    await requireRelation(ctx, 'member', fga.workspace(row.workspaceId));
+    const { spec, version } = await loadAgentSpec(ctx.principal.tenantId, row.id);
+    const versions = await ctx.db((db) =>
+      db
+        .select({ version: schema.agentVersions.version, createdAt: schema.agentVersions.createdAt, createdBy: schema.agentVersions.createdBy })
+        .from(schema.agentVersions)
+        .where(eq(schema.agentVersions.agentId, row.id))
+        .orderBy(desc(schema.agentVersions.version)),
+    );
+    return { agent: toAgent(row), spec, version, versions: versions.map((v) => ({ ...v, createdAt: v.createdAt.toISOString() })), webhookConfigured: Boolean(row.webhookSecretHash) };
+  }),
+
+  /** PUT /v1/agents/:id/spec — every save is a new version; runs record the version they ran. */
+  putSpec: procedure.input(z.object({ id: Uuid, spec: AgentSpec })).mutation(async ({ ctx, input }) => {
+    const current = await loadAgent(ctx, input.id);
+    await requireRelation(ctx, 'can_manage', fga.agent(input.id));
+    if (current.status === 'archived') throw new ProblemError(problems.preconditionFailed('archived agents cannot be modified'));
+    const { core } = agentCore(ctx);
+    // Autonomy is displayed, never settable, until Module 10.
+    const spec: AgentSpec = { ...input.spec, autonomy: 'SHADOW' };
+    const issues: Array<{ path: string; message: string }> = [];
+    const known = new Set((await core.execution.toolDeclarations(ctx.principal.tenantId, spec.allowedTools)).map((t) => t.toolId));
+    spec.allowedTools.forEach((t, i) => !known.has(t) && issues.push({ path: `allowedTools.${i}`, message: `no tool ${t} in this tenant` }));
+    spec.triggers.forEach((t, i) => {
+      if (t.kind !== 'schedule') return;
+      try {
+        new Cron(t.cron, { timezone: t.tz });
+      } catch (e) {
+        issues.push({ path: `triggers.${i}.cron`, message: e instanceof Error ? e.message : 'invalid cron' });
+      }
+    });
+    if (spec.triggers.some((t) => t.kind !== 'manual') && !spec.objectiveTemplate.trim()) issues.push({ path: 'objectiveTemplate', message: 'scheduled and webhook triggers need an objective template' });
+    if (spec.program) {
+      try {
+        const p = parse(spec.program);
+        const v = await core.execution.validateProgram(ctx.principal.tenantId, p, { maxCollection: spec.limits.maxFanout });
+        for (const e of v.errors) issues.push({ path: 'program', message: `${e.code}: ${e.message}` });
+        const bound = callBound(p, spec.limits.maxFanout);
+        if (bound > spec.limits.maxSteps) issues.push({ path: 'program', message: `up to ${bound} tool calls; max_steps is ${spec.limits.maxSteps}` });
+      } catch (e) {
+        issues.push({ path: 'program', message: e instanceof ParseError ? e.message : String(e) });
+      }
+    }
+    if (issues.length) throw new ProblemError(problems.validation(issues));
+    const row = await ctx.db(async (db) => {
+      const [latest] = await db.select({ v: schema.agentVersions.version }).from(schema.agentVersions).where(eq(schema.agentVersions.agentId, input.id)).orderBy(desc(schema.agentVersions.version)).limit(1);
+      const version = latest ? latest.v + 1 : current.version;
+      await db.insert(schema.agentVersions).values({ tenantId: ctx.principal.tenantId, agentId: input.id, version, specJson: spec, createdBy: ctx.principal.userId });
+      const [updated] = await db
+        .update(schema.agents)
+        .set({ specJson: spec, version, ...(current.status === 'draft' ? { status: 'active' } : {}) })
+        .where(eq(schema.agents.id, input.id))
+        .returning();
+      await emitEvent(db, ctx.principal.tenantId, ctx.principal.userId, 'agent.spec_saved', { agentId: input.id, version, tools: spec.allowedTools.length });
+      return updated!;
+    });
+    return { agent: toAgent(row), spec, version: row.version };
+  }),
+
+  /**
+   * POST /v1/agents/:id/test — a dry run: C1 and C2 for real, then the program in SIMULATE mode.
+   * Reads execute (they have no effect); every write is simulated. Nothing leaves the building.
+   */
+  test: procedure.input(z.object({ id: Uuid, objective: z.string().trim().min(1).max(4000) })).mutation(async ({ ctx, input }) => {
+    requireCapability(ctx, 'agents.run');
+    await requireRelation(ctx, 'can_run', fga.agent(input.id));
+    const { core } = agentCore(ctx);
+    try {
+      const { agent, spec, version } = await loadAgentSpec(ctx.principal.tenantId, input.id);
+      const objective = await understand({ tenantId: ctx.principal.tenantId, principalUserId: ctx.principal.userId, text: input.objective, origin: 'principal' }, core.mentions);
+      const bindings = await bindConnectors(ctx.principal.tenantId, ctx.principal.userId, spec, core.registry);
+      const runId = `test-${randomUUID()}`;
+      const run: LoadedRun = {
+        id: runId,
+        tenantId: ctx.principal.tenantId,
+        workspaceId: agent.workspaceId,
+        agentId: agent.id,
+        agentVersion: version,
+        principalUserId: ctx.principal.userId,
+        conversationId: null,
+        trigger: 'test',
+        objective,
+        status: 'PLANNING',
+        statusReason: null,
+        programVersion: 0,
+        replanCount: 0,
+        costCents: 0,
+        pending: null,
+        checkpoint: { bindings, approvals: [] },
+        spec,
+      };
+      const plan = await planRun(run, core.planning);
+      if (!plan.ok) return { objective, plan: { ok: false as const, reason: plan.reason, attempts: plan.attempts }, dryRun: null };
+      const inputs = Object.fromEntries(
+        objective.entities.map((e) => [e.binding, { data: { id: e.resolvedId, type: e.type, name: e.name ?? e.raw, email: e.email ?? null }, taint: 'TRUSTED' as const, sourceId: `entity:${e.binding}` }]),
+      );
+      const dryRun = await core.execution.runProgram({
+        tenantId: ctx.principal.tenantId,
+        runId,
+        program: plan.program,
+        mode: 'simulate',
+        modelId: plan.modelId,
+        now: new Date().toISOString(),
+        bindings,
+        objective: objective.objective,
+        inputs,
+        maxCollection: spec.limits.maxFanout,
+      });
+      return {
+        objective,
+        plan: { ok: true as const, text: print(plan.program), rows: plan.rows, blocking: plan.blocking, assumptions: plan.assumptions, source: plan.source, attempts: plan.attempts },
+        dryRun,
+      };
+    } catch (e) {
+      return refusal(e);
+    }
+  }),
+
+  /** A new webhook-trigger secret, shown once. Only its hash is kept. */
+  rotateWebhookSecret: procedure.input(z.object({ id: Uuid })).mutation(async ({ ctx, input }) => {
+    await loadAgent(ctx, input.id);
+    await requireRelation(ctx, 'can_manage', fga.agent(input.id));
+    const secret = `agt_${randomBytes(24).toString('base64url')}`;
+    await ctx.db(async (db) => {
+      await db.update(schema.agents).set({ webhookSecretHash: hashSecret(secret) }).where(eq(schema.agents.id, input.id));
+      await emitEvent(db, ctx.principal.tenantId, ctx.principal.userId, 'agent.webhook_secret_rotated', { agentId: input.id });
+    });
+    return { secret, path: `/v1/hooks/agents/${input.id}` };
   }),
 
   /**

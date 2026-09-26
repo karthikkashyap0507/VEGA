@@ -11,6 +11,8 @@ import type { OAuthClientConfig } from '@vega/connector-sdk';
 export function oauthClientsFromEnv(
   env: NodeJS.ProcessEnv,
   publicUrl: string,
+  /** Development sandbox provider (CONNECTOR_SANDBOX_URL): token exchange goes there too. */
+  fetchImpl?: typeof fetch,
 ): Partial<Record<'google' | 'microsoft' | 'slack', OAuthClientConfig>> {
   const base = publicUrl.replace(/\/$/, '');
   const clients: Partial<Record<'google' | 'microsoft' | 'slack', OAuthClientConfig>> = {};
@@ -33,5 +35,6 @@ export function oauthClientsFromEnv(
   if (env['SLACK_CLIENT_ID'] && env['SLACK_CLIENT_SECRET']) {
     clients.slack = { clientId: env['SLACK_CLIENT_ID'], clientSecret: env['SLACK_CLIENT_SECRET'], redirectUri: redirect('slack') };
   }
+  if (fetchImpl) for (const c of Object.values(clients)) c.fetchImpl = fetchImpl;
   return clients;
 }

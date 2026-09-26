@@ -20,13 +20,13 @@ export class PgRecorder implements Recorder {
         modelId: p.modelId,
         valid: p.valid,
         validationErrors: p.validationErrors ?? null,
-      }),
+      }).onConflictDoNothing(),
     );
   }
 
   async source(s: SourceRecord) {
     await withTenant(s.tenantId, (db) =>
-      db.insert(schema.sources).values({ tenantId: s.tenantId, runId: s.runId, uri: s.uri, taint: s.taint, digest: s.digest, connectorId: s.connectorId ?? null, meta: s.meta }),
+      db.insert(schema.sources).values({ tenantId: s.tenantId, runId: s.runId, uri: s.uri, taint: s.taint, digest: s.digest, connectorId: s.connectorId ?? null, meta: s.meta }).onConflictDoNothing(),
     );
   }
 
@@ -55,14 +55,15 @@ export class PgRecorder implements Recorder {
           nodeId: d.nodeId ?? null,
           stepIndex: d.stepIndex,
         })),
-      ),
+      ).onConflictDoNothing(),
     );
   }
 
-  async violation(v: ViolationRecord) {
+  /** Returns false when this violation was already recorded (a durable run replaying). */
+  async violation(v: ViolationRecord): Promise<boolean> {
     await this.flush();
-    await withTenant(v.tenantId, async (db) => {
-      await db.insert(schema.taintViolations).values({
+    return withTenant(v.tenantId, async (db) => {
+      const inserted = await db.insert(schema.taintViolations).values({
         tenantId: v.tenantId,
         runId: v.runId,
         nodeId: v.nodeId,
@@ -75,13 +76,15 @@ export class PgRecorder implements Recorder {
         programRef: v.programRef,
         severity: v.severity,
         detail: v.detail,
-      });
+      }).onConflictDoNothing().returning({ id: schema.taintViolations.id });
+      if (!inserted.length) return false;
       await db.insert(schema.platformEvents).values({
         tenantId: v.tenantId,
         actorId: null,
         kind: 'security.taint_violation',
         payload: { runId: v.runId, toolId: v.toolId, kind: v.kind, severity: v.severity, argPath: v.argPath },
       });
+      return true;
     });
   }
 }

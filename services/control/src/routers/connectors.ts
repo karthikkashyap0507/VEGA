@@ -302,7 +302,14 @@ export const connectorsRouter = router({
         await ctx.db((db) => db.update(schema.connectors).set({ status: 'revoked', enabledTools: [] }).where(eq(schema.connectors.id, row.id)));
         throw new ProblemError(problems.conflict('this account is already connected'));
       }
-      return { connector: toConnector(await loadConnector(ctx, row.id)), health: report };
+      // Module 4: runs paused for this connector (§12 "resume after re-authorization") continue.
+      const resumed = ctx.deps.agent
+        ? await ctx.deps.agent.coordinator.connectorAuthorized(ctx.principal.tenantId, row.kind === 'mcp' ? `mcp.${String((row.config as { slug?: string }).slug ?? '')}` : row.kind, row.id).catch((err: unknown) => {
+            ctx.log.warn({ err }, 'could not resume runs waiting for this connector');
+            return 0;
+          })
+        : 0;
+      return { connector: toConnector(await loadConnector(ctx, row.id)), health: report, resumedRuns: resumed };
     }),
 
   remove: procedure.input(z.object({ id: Uuid })).mutation(async ({ ctx, input }) => {

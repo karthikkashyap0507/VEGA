@@ -14,6 +14,7 @@ import type { IdentityAdmin, PrincipalClaims } from '@vega/idp';
 import type { ExposedFeatures, PlanLimits } from '@vega/contracts';
 import { tenantAttributes, type Span } from '@vega/telemetry';
 import type { ConnectorDeps } from './connectors/deps.js';
+import type { AgentCoreDeps, RunCoordinator } from './agent/coordinator.js';
 
 /**
  * Control-plane RPC.
@@ -32,6 +33,8 @@ export interface ControlDeps {
   returnInviteCodes?: boolean;
   /** Module 2. Absent: connector procedures answer 503. */
   connectors?: ConnectorDeps;
+  /** Module 4: intent, planning and the run coordinator. Absent: run procedures answer 503. */
+  agent?: { core: AgentCoreDeps; coordinator: RunCoordinator };
 }
 
 export interface Principal extends PrincipalClaims {
@@ -200,6 +203,12 @@ export const signupProcedure = t.procedure.use(async ({ ctx, next }) => {
     throw new ProblemError(problems.forbidden('signup principal required'));
   }
   return next({ ctx: { ...ctx, log: ctx.deps.logger.child({ system: 'signup' }) } });
+});
+
+/** The inbound agent-webhook principal (Module 4) and nothing else. */
+export const webhookProcedure = t.procedure.use(async ({ ctx, next }) => {
+  if (ctx.principal?.system !== 'webhook') throw new ProblemError(problems.forbidden('webhook principal required'));
+  return next({ ctx: { ...ctx, log: ctx.deps.logger.child({ system: 'webhook' }) } });
 });
 
 /** Capability gate (layer 1 of 2 — see packages/authz/src/roles.ts). */

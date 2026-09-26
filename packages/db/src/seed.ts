@@ -127,21 +127,50 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
         [tenantId, conn.rows[0]!.id],
       );
 
-      await client.query(`INSERT INTO sources (tenant_id, run_id, uri, taint, digest) VALUES ($1, 'seed', 'gmail:seed', 'UNTRUSTED', 'sha256:seed')`, [tenantId]);
+      await client.query(`INSERT INTO sources (tenant_id, run_id, uri, taint, digest) VALUES ($1, 'seed', 'gmail:seed', 'UNTRUSTED', 'sha256:seed') ON CONFLICT DO NOTHING`, [tenantId]);
       await client.query(
-        `INSERT INTO derivations (tenant_id, run_id, value_ref, op, taint, data_taint, context_taint, step_index) VALUES ($1, 'seed', 'v1', 'literal', 'TRUSTED', 'TRUSTED', 'TRUSTED', 1)`,
+        `INSERT INTO derivations (tenant_id, run_id, value_ref, op, taint, data_taint, context_taint, step_index) VALUES ($1, 'seed', 'v1', 'literal', 'TRUSTED', 'TRUSTED', 'TRUSTED', 1) ON CONFLICT DO NOTHING`,
         [tenantId],
       );
       await client.query(
         `INSERT INTO taint_violations (tenant_id, run_id, tool_id, kind, attempted_taint, declared_max, arg_path, program_ref, severity)
-         VALUES ($1, 'seed', 'gmail.send', 'RECIPIENT', 'UNTRUSTED', 'TRUSTED', 'to[0]', 'sha256:seed', 'CRITICAL')`,
+         VALUES ($1, 'seed', 'gmail.send', 'RECIPIENT', 'UNTRUSTED', 'TRUSTED', 'to[0]', 'sha256:seed', 'CRITICAL') ON CONFLICT DO NOTHING`,
         [tenantId],
       );
-      await client.query(`INSERT INTO programs (tenant_id, run_id, ast_json, ast_digest, model_id, valid) VALUES ($1, 'seed', '{}', 'sha256:seed', 'seed', true)`, [tenantId]);
+      await client.query(`INSERT INTO programs (tenant_id, run_id, ast_json, ast_digest, model_id, valid) VALUES ($1, 'seed', '{}', 'sha256:seed', 'seed', true) ON CONFLICT DO NOTHING`, [tenantId]);
       await client.query(
         `INSERT INTO trusted_contacts (tenant_id, email, added_by) VALUES ($1, 'seed-' || substr(md5(random()::text), 1, 8) || '@partner.example', $2)`,
         [tenantId, userId],
       );
+
+      const run = await client.query<{ id: string }>(
+        `INSERT INTO runs (tenant_id, workspace_id, agent_id, principal_user_id, trigger, objective_json, status)
+         VALUES ($1, $2, $3, $4, 'api', '{"objective":"seed"}', 'COMPLETED') RETURNING id`,
+        [tenantId, workspaceId, ag.rows[0]!.id, userId],
+      );
+      const node = await client.query<{ id: string }>(
+        `INSERT INTO task_nodes (tenant_id, run_id, program_version, step_index, kind, tool_id, status)
+         VALUES ($1, $2, 1, 0, 'TOOL_CALL', 'gmail.search', 'done') RETURNING id`,
+        [tenantId, run.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO actions (tenant_id, run_id, node_id, tool_id, args_digest, taint_level, reversibility, state)
+         VALUES ($1, $2, $3, 'gmail.send', 'x', 'TRUSTED', 'R2', 'COMMITTED')`,
+        [tenantId, run.rows[0]!.id, node.rows[0]!.id],
+      );
+      await client.query(`INSERT INTO replans (tenant_id, run_id, from_step, from_version, reason) VALUES ($1, $2, 0, 1, 'tool_failure')`, [tenantId, run.rows[0]!.id]);
+      await client.query(`INSERT INTO agent_versions (tenant_id, agent_id, version, spec_json, created_by) VALUES ($1, $2, 1, '{}', $3) ON CONFLICT DO NOTHING`, [tenantId, ag.rows[0]!.id, userId]);
+      const conv = await client.query<{ id: string }>(
+        `INSERT INTO conversations (tenant_id, workspace_id, agent_id, user_id) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [tenantId, workspaceId, ag.rows[0]!.id, userId],
+      );
+      await client.query(`INSERT INTO conversation_messages (tenant_id, conversation_id, role, body) VALUES ($1, $2, 'user', 'hello')`, [tenantId, conv.rows[0]!.id]);
+      await client.query(`INSERT INTO trigger_fires (tenant_id, agent_id, fire_at) VALUES ($1, $2, now() - (random() * interval '1000 days'))`, [tenantId, ag.rows[0]!.id]);
+      const hook = await client.query<{ id: string }>(
+        `INSERT INTO webhook_endpoints (tenant_id, url, event_kinds, secret_sealed, created_by) VALUES ($1, 'https://hooks.partner.example/vega', '{run.completed}', 'sealed', $2) RETURNING id`,
+        [tenantId, userId],
+      );
+      await client.query(`INSERT INTO webhook_deliveries (tenant_id, endpoint_id, event_id, kind) VALUES ($1, $2, 1, 'run.completed')`, [tenantId, hook.rows[0]!.id]);
 
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;

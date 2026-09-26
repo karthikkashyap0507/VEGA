@@ -1861,6 +1861,7 @@ company if the per-connector economics do not work. Measure it explicitly from t
 | **D-10** | **Undo (D1) and taint defense (D4) are identical in every tier, including free** | D1 is the only differentiator that translates to a single user; it is the reason to choose us over a free assistant | 2026-08-22 |
 | **D-11** | **Wealth-management beachhead withdrawn**; sixth selection criterion added | Smarsh owns FINRA 3110 supervision (Gartner MQ Leader, 18 of top 20 FIs, agentic supervision shipped May 2026) — §4.2 | 2026-08-22 |
 | **D-12** | **C4 assigned to Module 5** and reclassified as existential below Teams | At $30/month, inference cost is the whole business, not a rounding error (§22.6) | 2026-08-22 |
+| **D-13** | **Durable execution on DBOS Transact (Postgres-native, MIT) for Phase 1**, behind `packages/orchestration`; the engine choice of D-06 is revisited, its principle (consume, don't build) stands | The module 4 evaluation (module4.md §9): one workflow per run, completed steps never re-run, durable messages and timers — on the Postgres we already operate, with no cluster to run. Our at-most-once guarantee lives in our own journal and the M2 ledger either way; the `Orchestrator` interface keeps a Temporal adapter a contained change | 2026-09-26 |
 
 ### Open — ranked by leverage
 

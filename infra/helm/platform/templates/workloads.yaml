@@ -16,7 +16,11 @@
         "env" (list (dict "name" "SERVICE" "value" "control")
                     (dict "name" "GATEWAY_JWKS_URL" "value" (printf "http://gateway.%s.svc:3001/.well-known/jwks.json" (include "ns.control" .)))
                     (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)
-                    (dict "name" "EXECUTION_URL" "value" (printf "%s://execution.%s.svc:3003" $scheme (include "ns.execution" .)))))
+                    (dict "name" "EXECUTION_URL" "value" (printf "%s://execution.%s.svc:3003" $scheme (include "ns.execution" .)))
+                    (dict "name" "WEB_FETCH_URL" "value" (printf "%s://web-fetch.%s.svc:3005" $scheme (include "ns.execution" .)))
+                    (dict "name" "MODEL_PLANNER" "value" .Values.models.planner)
+                    (dict "name" "MODEL_ROUTINE" "value" .Values.models.routine)
+                    (dict "name" "LITELLM_BASE_URL" "value" .Values.models.gatewayUrl)))
   (dict "name" "execution" "plane" "execution" "port" 3003 "image" .Values.image.service "secret" .Values.secrets.execution "internal" true
         "env" (list (dict "name" "SERVICE" "value" "execution")
                     (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)

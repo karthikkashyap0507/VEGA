@@ -51,3 +51,5 @@ playwright-report/
 **/.terraform/
 *.tfstate
 *.tfstate.*
+evals/intent/report.json
+evals/intent/planner-report.json

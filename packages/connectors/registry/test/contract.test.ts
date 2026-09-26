@@ -233,9 +233,10 @@ describe('invocation (module2.md §8.2)', () => {
     const r = await runtime.execute({ tenantId: TENANT, connectorId: id, toolId: 'gmail.send', runId: 'r', nodeId: 'n', args: { to: ['x@partner.example'], subject: 's', body: 'b' } });
     expect(r).toMatchObject({ ok: false, error: { code: 'TRANSIENT' } });
     expect(providers.core.calls.filter((c) => c.url.endsWith('/messages/send'))).toHaveLength(1);
-    // ...and the key stays claimed: a blind retry cannot send a possible duplicate.
+    // ...and the key stays claimed: a blind retry cannot send a possible duplicate, and says
+    // the outcome is unknown rather than pretending it was a conflict.
     const again = await runtime.execute({ tenantId: TENANT, connectorId: id, toolId: 'gmail.send', runId: 'r', nodeId: 'n', args: { to: ['x@partner.example'], subject: 's', body: 'b' } });
-    expect(again).toMatchObject({ ok: false, error: { code: 'CONFLICT' } });
+    expect(again).toMatchObject({ ok: false, error: { code: 'OUTCOME_UNKNOWN' } });
     expect(providers.google.sent).toHaveLength(0);
   });
 

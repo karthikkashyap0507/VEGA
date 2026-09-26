@@ -26,13 +26,15 @@
     "db:reset": "docker compose -f infra/docker/docker-compose.yml down -v && docker compose -f infra/docker/docker-compose.yml up -d postgres",
     "idp:bootstrap": "tsx --env-file-if-exists=.env scripts/zitadel-bootstrap.ts",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
-    "tools:generate": "tsx scripts/generate-tool-declarations.ts"
+    "tools:generate": "tsx scripts/generate-tool-declarations.ts",
+    "sandbox:providers": "tsx scripts/sandbox-providers.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.23.1",
+    "@vega/connector-testing": "workspace:*",
     "@vega/connectors": "workspace:*",
     "eslint": "^9.17.0",
     "globals": "^17.11.0",

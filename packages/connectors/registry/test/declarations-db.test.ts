@@ -7,6 +7,9 @@ import { PgConnectorStore, PgInvocationStore, PgTokenVault } from '@vega/connect
 import { PgMcpToolStore, checkDeclaration } from '@vega/connector-mcp';
 import { declarationsSql, launchRegistry } from '../src/index.js';
 
+/** The transaction's own client (withTenant's drizzle instance wraps it). */
+const clientOf = (db: unknown) => (db as { $client: pg.PoolClient }).$client;
+
 /**
  * DECLARATION SYNC + Postgres stores — docs/module2.md §4, §11.
  *
@@ -109,7 +112,7 @@ describe('Postgres stores', () => {
   const slug = `partner_${Date.now().toString(36)}`;
   async function mcpConnector(tenantId: string, ownerId: string): Promise<string> {
     const [row] = await withTenant(tenantId, async (db) => {
-      const { rows } = await db.$client.query<{ id: string }>(
+      const { rows } = await clientOf(db).query<{ id: string }>(
         `INSERT INTO connectors (tenant_id, kind, display_name, owner_user_id, status, config)
          VALUES ($1, 'mcp', 'Partner tools', $2, 'active', $3) RETURNING id`,
         [tenantId, ownerId, JSON.stringify({ serverUrl: 'https://tools.partner.example/mcp', slug })],
@@ -146,7 +149,7 @@ describe('Postgres stores', () => {
   it('PgInvocationStore: one claim per key, replay after success, mismatch on different args, release on proven failure', async () => {
     const store = new PgInvocationStore();
     const [conn] = await withTenant(seeded.tenantA, (db) =>
-      db.$client.query<{ id: string }>(`SELECT id FROM connectors WHERE kind = 'gmail' LIMIT 1`).then((r) => r.rows),
+      clientOf(db).query<{ id: string }>(`SELECT id FROM connectors WHERE kind = 'gmail' LIMIT 1`).then((r) => r.rows),
     );
     const base = { tenantId: seeded.tenantA, connectorId: conn!.id, toolId: 'gmail.send', key: `k-${Date.now()}`, argsDigest: 'd1' };
     expect((await store.claim(base)).kind).toBe('fresh');

@@ -9,6 +9,9 @@ import { signupRouter } from './signup.js';
 import { tenantsRouter } from './tenants.js';
 import { usersRouter } from './users.js';
 import { workspacesRouter } from './workspaces.js';
+import { runsRouter } from './runs.js';
+import { conversationsRouter } from './conversations.js';
+import { triggersRouter, webhooksRouter } from './webhooks.js';
 
 export const appRouter = router({
   me: meRouter,
@@ -22,6 +25,10 @@ export const appRouter = router({
   programs: programsRouter,
   security: securityRouter,
   contacts: contactsRouter,
+  runs: runsRouter,
+  conversations: conversationsRouter,
+  webhooks: webhooksRouter,
+  triggers: triggersRouter,
   signup: signupRouter,
 });
 

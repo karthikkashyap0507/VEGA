@@ -46,6 +46,18 @@ export const PlannerInput = z.object({
   tools: z.array(PlannerTool).max(200),
   schemas: z.array(z.object({ name: z.string(), description: z.string(), jsonSchema: z.record(z.string(), z.unknown()) })).max(100),
   templates: z.array(z.string()).max(50),
+  /**
+   * Entities C1 resolved from registries the tenant controls: TRUSTED by construction, bound as
+   * program inputs. A recipient the planner may use must come from here or a literal.
+   */
+  entities: z
+    .array(z.object({ binding: z.string().regex(/^[a-z_][a-zA-Z0-9_]*$/), type: z.string(), name: z.string().max(200).optional(), email: z.string().max(320).optional() }))
+    .max(50)
+    .optional(),
+  /** Bounds from the agent spec (docs/module4.md §5.2). */
+  limits: z.object({ maxSteps: z.number().int(), maxFanout: z.number().int() }).optional(),
+  /** Steps already committed in this run (a replan): facts, never to be redone. */
+  committed: z.array(z.object({ toolId: z.string(), summary: z.string().max(500) })).max(100).optional(),
   /** Feedback from a rejected previous attempt (static validation errors only). */
   feedback: z.array(z.object({ code: z.string(), message: z.string(), nodeId: z.string().optional() })).max(50).optional(),
 });

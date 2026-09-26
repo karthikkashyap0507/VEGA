@@ -23,6 +23,8 @@
     "@vega/dsl": "workspace:*",
     "@vega/idp": "workspace:*",
     "@vega/interpreter": "workspace:*",
+    "@vega/orchestration": "workspace:*",
+    "@vega/runs": "workspace:*",
     "@vega/shared": "workspace:*",
     "fastify": "^5.12.5",
     "iovalkey": "^0.4.0",

@@ -1,4 +1,4 @@
-import type { ToolResult } from '@vega/contracts';
+import type { ToolDeclarationRecord, ToolResult } from '@vega/contracts';
 import type { OAuthClientConfig, TokenVault, ToolRegistry } from '@vega/connector-sdk';
 import type { McpToolStore } from '@vega/connector-mcp';
 
@@ -37,12 +37,38 @@ export interface ProgramRunInput {
   bindings: Record<string, string>;
   approvedNodes?: string[];
   objective?: string;
+  inputs?: Record<string, { data: unknown; taint: 'TRUSTED' | 'ORG' | 'UNTRUSTED'; sourceId?: string }>;
+  maxCollection?: number;
 }
+
+export interface StaticCallView {
+  nodeId: string;
+  toolId: string;
+  argTaint: 'TRUSTED' | 'ORG' | 'UNTRUSTED';
+  contextTaint: 'TRUSTED' | 'ORG' | 'UNTRUSTED';
+  expected: 'PROCEED' | 'REQUIRE_APPROVAL' | 'VIOLATION';
+}
+
+export interface ValidationView {
+  valid: boolean;
+  errors: Array<{ code: string; message: string; nodeId?: string; path?: string; severity?: string }>;
+  calls: StaticCallView[];
+  program?: unknown;
+  tools?: Record<string, { reversibility: string; egressClass: string; connectorKind: string; idempotency: string }>;
+}
+
+export type RunTopic = 'decision' | 'input' | 'program' | 'resume';
 
 export interface ExecutionClient {
   simulate(input: { tenantId: string; connectorId: string; toolId: string; args: unknown }): Promise<ToolResult<unknown>>;
   runProgram(input: ProgramRunInput): Promise<Record<string, unknown> & { status: string }>;
-  validateProgram(tenantId: string, program: unknown): Promise<{ valid: boolean; errors: Array<{ code: string; message: string; nodeId?: string; path?: string; severity?: string }>; calls: unknown[]; program?: unknown }>;
+  validateProgram(tenantId: string, program: unknown, opts?: { inputs?: Record<string, 'TRUSTED' | 'ORG' | 'UNTRUSTED'>; maxCollection?: number }): Promise<ValidationView>;
+  /** Declarations for the planner prompt (Module 4). */
+  toolDeclarations(tenantId: string, toolIds: string[]): Promise<ToolDeclarationRecord[]>;
+  /** The durable executor (Module 4). */
+  startRun(input: { tenantId: string; runId: string; token?: string | undefined }): Promise<void>;
+  signalRun(input: { tenantId: string; runId: string; topic: RunTopic; message: Record<string, unknown>; token?: string | undefined }): Promise<void>;
+  cancelRun(input: { tenantId: string; runId: string; by?: string | undefined; reason?: string | undefined }): Promise<{ status: string }>;
   programCatalog(): Promise<{ schemas: Array<{ name: string; description: string; jsonSchema: Record<string, unknown> }>; templates: string[] }>;
   health(tenantId: string, connectorId: string): Promise<ProbeReport>;
   discoverMcp(tenantId: string, connectorId: string): Promise<Array<{ toolId: string; name: string; declaredBy: string }>>;
@@ -95,11 +121,24 @@ export class HttpExecutionClient implements ExecutionClient {
     return this.post<Record<string, unknown> & { status: string }>('/internal/programs/run', input);
   }
 
-  validateProgram(tenantId: string, program: unknown) {
-    return this.post<{ valid: boolean; errors: Array<{ code: string; message: string; nodeId?: string; path?: string; severity?: string }>; calls: unknown[]; program?: unknown }>(
-      '/internal/programs/validate',
-      { tenantId, program },
-    );
+  validateProgram(tenantId: string, program: unknown, opts: { inputs?: Record<string, 'TRUSTED' | 'ORG' | 'UNTRUSTED'>; maxCollection?: number } = {}) {
+    return this.post<ValidationView>('/internal/programs/validate', { tenantId, program, ...opts });
+  }
+
+  async toolDeclarations(tenantId: string, toolIds: string[]) {
+    return (await this.post<{ tools: ToolDeclarationRecord[] }>('/internal/programs/tools', { tenantId, toolIds })).tools;
+  }
+
+  async startRun(input: { tenantId: string; runId: string; token?: string | undefined }) {
+    await this.post('/internal/runs/start', input);
+  }
+
+  async signalRun(input: { tenantId: string; runId: string; topic: RunTopic; message: Record<string, unknown>; token?: string | undefined }) {
+    await this.post('/internal/runs/signal', input);
+  }
+
+  cancelRun(input: { tenantId: string; runId: string; by?: string | undefined; reason?: string | undefined }) {
+    return this.post<{ status: string }>('/internal/runs/cancel', input);
   }
 
   async programCatalog() {

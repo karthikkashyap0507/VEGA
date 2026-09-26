@@ -1,4 +1,5 @@
 import {
+  bigint,
   bigserial,
   boolean,
   customType,
@@ -13,6 +14,7 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 /**
  * drizzle-orm/pg-core has no `bytea` helper. The secret vault stores raw ciphertext, so
@@ -107,6 +109,7 @@ export const agents = pgTable(
     /** Zitadel machine user — an agent is a principal in its own right (module1.md §5.5). */
     idpMachineId: text('idp_machine_id'),
     status: text('status').notNull().default('draft'),
+    webhookSecretHash: text('webhook_secret_hash'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique('agents_name_version_unique').on(t.workspaceId, t.name, t.version)],
@@ -342,6 +345,10 @@ export const programs = pgTable('programs', {
   modelId: text('model_id').notNull(),
   valid: boolean('valid').notNull(),
   validationErrors: jsonb('validation_errors'),
+  /** Module 4: the plan version within a durable run (NULL for ad-hoc M3 runs). */
+  version: integer('version'),
+  source: text('source'),
+  attempts: integer('attempts'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -352,6 +359,154 @@ export const trustedContacts = pgTable('trusted_contacts', {
   displayName: text('display_name'),
   company: text('company'),
   addedBy: uuid('added_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ------------------------------------------------------------------ Module 4: runs
+export const runs = pgTable('runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  workspaceId: uuid('workspace_id').notNull(),
+  agentId: uuid('agent_id').notNull(),
+  agentVersion: integer('agent_version').notNull().default(1),
+  principalUserId: uuid('principal_user_id').notNull(),
+  conversationId: uuid('conversation_id'),
+  trigger: text('trigger').notNull(),
+  objectiveJson: jsonb('objective_json').notNull(),
+  programId: uuid('program_id'),
+  programVersion: integer('program_version').notNull().default(0),
+  status: text('status').notNull().default('CREATED'),
+  statusReason: text('status_reason'),
+  replanCount: integer('replan_count').notNull().default(0),
+  pendingJson: jsonb('pending_json'),
+  checkpointJson: jsonb('checkpoint_json'),
+  resultJson: jsonb('result_json'),
+  errorJson: jsonb('error_json'),
+  costCents: integer('cost_cents').notNull().default(0),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+});
+
+export const taskNodes = pgTable('task_nodes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  programVersion: integer('program_version').notNull(),
+  parentId: uuid('parent_id'),
+  stepIndex: integer('step_index').notNull(),
+  callSeq: integer('call_seq'),
+  dslNodeId: text('dsl_node_id'),
+  kind: text('kind').notNull(),
+  toolId: text('tool_id'),
+  argsJson: jsonb('args_json'),
+  argsDigest: text('args_digest'),
+  plannedRisk: integer('planned_risk'),
+  plannedReversibility: text('planned_reversibility'),
+  plannedEgress: text('planned_egress'),
+  plannedTaint: text('planned_taint'),
+  plannedDecision: text('planned_decision'),
+  status: text('status').notNull().default('pending'),
+  attempt: integer('attempt').notNull().default(0),
+  resultJson: jsonb('result_json'),
+  effectJson: jsonb('effect_json'),
+  errorJson: jsonb('error_json'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+});
+
+export const actions = pgTable('actions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  nodeId: uuid('node_id').notNull(),
+  toolId: text('tool_id').notNull(),
+  argsDigest: text('args_digest').notNull(),
+  effectJson: jsonb('effect_json'),
+  taintLevel: text('taint_level').notNull(),
+  reversibility: text('reversibility').notNull(),
+  riskScore: integer('risk_score'),
+  riskTier: text('risk_tier'),
+  state: text('state').notNull().default('PLANNED'),
+  committedAt: timestamp('committed_at', { withTimezone: true }),
+  releasedAt: timestamp('released_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const replans = pgTable('replans', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  fromStep: integer('from_step').notNull(),
+  fromVersion: integer('from_version').notNull(),
+  reason: text('reason').notNull(),
+  detailJson: jsonb('detail_json'),
+  newProgramId: uuid('new_program_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const agentVersions = pgTable('agent_versions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  agentId: uuid('agent_id').notNull(),
+  version: integer('version').notNull(),
+  specJson: jsonb('spec_json').notNull(),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const conversations = pgTable('conversations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  workspaceId: uuid('workspace_id').notNull(),
+  agentId: uuid('agent_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  title: text('title').notNull().default('New conversation'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const conversationMessages = pgTable('conversation_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
+  role: text('role').notNull(),
+  body: text('body').notNull(),
+  runId: uuid('run_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const triggerFires = pgTable('trigger_fires', {
+  tenantId: uuid('tenant_id').notNull(),
+  agentId: uuid('agent_id').notNull(),
+  fireAt: timestamp('fire_at', { withTimezone: true }).notNull(),
+  runId: uuid('run_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const webhookEndpoints = pgTable('webhook_endpoints', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  url: text('url').notNull(),
+  eventKinds: text('event_kinds').array().notNull(),
+  secretSealed: text('secret_sealed').notNull(),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastEventId: bigint('last_event_id', { mode: 'bigint' }).notNull().default(sql`0`),
+});
+
+export const webhookDeliveries = pgTable('webhook_deliveries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  endpointId: uuid('endpoint_id').notNull(),
+  eventId: bigint('event_id', { mode: 'bigint' }).notNull(),
+  kind: text('kind').notNull(),
+  status: text('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  lastStatus: integer('last_status'),
+  lastError: text('last_error'),
+  nextAt: timestamp('next_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -374,6 +529,16 @@ export const TENANT_SCOPED_TABLES = [
   'taint_violations',
   'programs',
   'trusted_contacts',
+  'runs',
+  'task_nodes',
+  'actions',
+  'replans',
+  'agent_versions',
+  'conversations',
+  'conversation_messages',
+  'trigger_fires',
+  'webhook_endpoints',
+  'webhook_deliveries',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

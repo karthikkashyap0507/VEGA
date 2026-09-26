@@ -1,14 +1,15 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ToolError } from '@vega/connector-sdk';
-import { inProcessBackend, type SafeFetchOptions, type WebBackend } from '@vega/connector-web';
+import { inProcessBackend, safePost, type SafeFetchOptions, type WebBackend } from '@vega/connector-web';
 
 /**
  * Isolated web fetcher — docs/module2.md §10.3. The one workload with public egress, because
  * it ingests arbitrary attacker-controlled content:
  *
  *   · no service-account token, no database, no connector secret — nothing worth stealing
- *   · reachable only from the execution plane (Cilium), over mTLS
+ *   · reachable only from the execution plane (fetch/search) and the control plane (webhook
+ *     delivery, /deliver) — Cilium, over mTLS
  *   · egress to the public internet on 80/443 EXCEPT private, link-local and loopback ranges —
  *     enforced by the network, independently of the checks safeFetch runs in this process
  *   · output is text with active content stripped; the caller labels it UNTRUSTED
@@ -23,6 +24,12 @@ export interface WebFetchAppOptions {
 
 const FetchBody = z.object({ url: z.string().url().max(2048), maxBytes: z.number().int().min(1).max(5_000_000).default(1_000_000) });
 const SearchBody = z.object({ query: z.string().min(1).max(400), max: z.number().int().min(1).max(20).default(8) });
+// Outbound webhooks (Module 4): the control plane signs, this pod delivers. Only these headers pass.
+const DeliverBody = z.object({
+  url: z.string().url().max(2048).startsWith('https://'),
+  body: z.string().max(60_000),
+  headers: z.record(z.enum(['content-type', 'x-webhook-event', 'x-webhook-delivery', 'x-webhook-signature', 'x-webhook-timestamp']), z.string().max(500)),
+});
 
 export async function buildWebFetchApp(options: WebFetchAppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 64 * 1024, ...(options.https ? { https: options.https } : {}) }) as unknown as FastifyInstance;
@@ -55,6 +62,17 @@ export async function buildWebFetchApp(options: WebFetchAppOptions = {}): Promis
     if (!input.success) return reply.code(400).send({ error: { code: 'VALIDATION', message: input.error.message } });
     try {
       return { results: await backend.search(input.data.query, input.data.max) };
+    } catch (error) {
+      const f = fail(error);
+      return reply.code(f.status).send(f.body);
+    }
+  });
+
+  app.post('/deliver', async (req, reply) => {
+    const input = DeliverBody.safeParse(req.body);
+    if (!input.success) return reply.code(400).send({ error: { code: 'VALIDATION', message: input.error.message } });
+    try {
+      return await safePost(input.data.url, input.data.body, input.data.headers, options.fetchOptions ?? {});
     } catch (error) {
       const f = fail(error);
       return reply.code(f.status).send(f.body);

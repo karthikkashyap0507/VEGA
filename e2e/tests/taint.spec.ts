@@ -51,6 +51,8 @@ async function signIn(page: Page, path: string) {
 
 test('plan sandbox: static rejection, dry run with provenance, graph; security page: contacts and violations', async ({ page }) => {
   await signIn(page, '/chat');
+  // Module 4 made conversations the chat surface's first tab; the sandbox sits beside them.
+  await page.getByRole('tab', { name: 'Plan sandbox' }).click();
   const program = page.getByLabel('Program');
 
   // A laundering plan is rejected statically, with the reason, before anything runs.

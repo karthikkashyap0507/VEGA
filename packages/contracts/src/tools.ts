@@ -69,6 +69,11 @@ export const ToolErrorCode = z.enum([
   'VALIDATION',
   'EGRESS_DENIED',
   'CONNECTOR_UNAVAILABLE',
+  /**
+   * A previous invocation with this idempotency key was claimed and never finished (the process
+   * died mid-call): it may or may not have happened. Never retried; the executor escalates it.
+   */
+  'OUTCOME_UNKNOWN',
 ]);
 export type ToolErrorCode = z.infer<typeof ToolErrorCode>;
 

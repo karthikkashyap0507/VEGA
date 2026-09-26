@@ -103,7 +103,7 @@ jobs:
         run: pnpm --filter @vega/db test:isolation
 
   e2e:
-    name: E2E — sign in, invite, workspace, agent, connectors, plan sandbox (real IdP, real browser)
+    name: E2E — sign in, invite, workspace, agent, connectors, plan sandbox, chat runs (real IdP, real browser)
     runs-on: ubuntu-latest
     needs: [quality]
     steps:
@@ -131,8 +131,12 @@ jobs:
           sed -i "s#^EXTRACTOR_TOKEN=.*#EXTRACTOR_TOKEN=$(openssl rand -hex 24)#" .env
           # A Google OAuth client id the E2E consent test can see in the (intercepted) redirect.
           sed -i "s#^GOOGLE_CLIENT_ID=.*#GOOGLE_CLIENT_ID=e2e-google-client#; s#^GOOGLE_CLIENT_SECRET=.*#GOOGLE_CLIENT_SECRET=e2e-google-secret#" .env
-      - name: Start the four planes and the web app
+          # Module 4: every provider call goes to the sandbox provider (the fakes over HTTP).
+          echo "CONNECTOR_SANDBOX_URL=http://127.0.0.1:3099" >> .env
+      - name: Start the sandbox provider, the four planes and the web app
         run: |
+          (pnpm sandbox:providers > /tmp/sandbox.log 2>&1 &)
+          for i in $(seq 1 30); do curl -sf -X POST localhost:3099/__sent && break; sleep 1; done
           for s in extractor evidence execution gateway control; do (pnpm --filter @vega/service-$s start > /tmp/$s.log 2>&1 &); sleep 3; done
           pnpm --filter @vega/web build
           (cd apps/web && GATEWAY_URL=http://localhost:3001 npx next start --port 3000 > /tmp/web.log 2>&1 &)
@@ -229,6 +233,38 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Zero successful exfiltrations. No exceptions, no skips.
         run: npx vitest run evals/redteam packages/planner services/extractor
+
+  agent-core:
+    name: 'Agent core — durability, at-most-once, hook order, ambiguity (BLOCKING, module4.md §11)'
+    runs-on: ubuntu-latest
+    needs: [quality]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: OpenFGA (service containers cannot pass `run`)
+        run: docker run -d --name openfga -p 8081:8080 openfga/openfga:v1.21.0 run
+      - name: Database roles and schema
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/docker/initdb/primary/01-roles.sql
+          pnpm db:migrate
+      - name: Wait for OpenFGA
+        run: for i in $(seq 1 30); do curl -sf localhost:8081/healthz && break; sleep 1; done
+      - name: Executor (hook order, approvals, replans, limits, crash windows) and the chaos suite (worker processes SIGKILLed mid-run)
+        run: npx vitest run services/execution/test/executor.test.ts services/execution/test/durability.test.ts
+      - name: Across the planes (C1 → C2 → executor) and the ambiguity property (zero tolerance)
+        env: { SOUNDNESS_RUNS: '2000' }
+        run: npx vitest run services/control/test/runs.test.ts evals/taint-soundness/test/ambiguity.test.ts
+      - name: C1 entity resolution (≥ 95%) and C2 program validity (≥ 90% first attempt)
+        run: npx vitest run evals/intent
 
   compensator-correctness:
     name: 'Compensator correctness — BLOCKING (enable in M6)'

@@ -28,6 +28,9 @@ export const RULES = [
   'Branches (`when`) create block scope: names bound inside a branch are not visible after it.',
   'Bind reads with `let` and use them; never read something you do not use. Do not nest a call inside another call\'s arguments.',
   'Collections are bounded: `map`/`filter` take at most 100 items unless you give a smaller `limit`.',
+  'Entities in resolved_entities are bound as inputs by their binding name (e.g. `entity_1.email`); they are TRUSTED and may be used as recipients.',
+  'If already_done_do_not_repeat is present, those actions have happened: plan only what remains, and never repeat them.',
+  'Stay within limits: at most maxSteps tool calls and maxFanout items in any map/filter.',
   'Answer with the program only, inside one ```dsl fenced block.',
 ];
 
@@ -79,6 +82,9 @@ export function buildPlannerPrompt(input: PlannerInput): PlannerPrompt {
       available_tools: tools,
       available_schemas: parsed.schemas.map((s) => ({ name: s.name, description: s.description, fields: s.jsonSchema })),
       available_templates: parsed.templates,
+      ...(parsed.entities?.length ? { resolved_entities: parsed.entities } : {}),
+      ...(parsed.limits ? { limits: parsed.limits } : {}),
+      ...(parsed.committed?.length ? { already_done_do_not_repeat: parsed.committed } : {}),
       ...(parsed.feedback?.length ? { previous_attempt_rejected_because: parsed.feedback } : {}),
     },
     null,

@@ -16,6 +16,7 @@ import type { SessionService } from './sessions.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerConnectorRoutes } from './routes/connectors.js';
 import { registerProgramRoutes } from './routes/programs.js';
+import { registerRunRoutes } from './routes/runs.js';
 import { registerResourceRoutes } from './routes/resources.js';
 import { registerSystemRoutes } from './routes/system.js';
 
@@ -291,6 +292,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   registerResourceRoutes(app, hooks, deps);
   registerConnectorRoutes(app, hooks, deps);
   registerProgramRoutes(app, hooks, deps);
+  registerRunRoutes(app, hooks, deps);
 
   return app;
 }

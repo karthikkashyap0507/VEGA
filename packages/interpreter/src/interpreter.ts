@@ -32,6 +32,12 @@ export interface RunContext {
   maxCollection?: number;
   /** Calls a human already approved (M8); a REQUIRE_APPROVAL gate on these proceeds. */
   approvedNodes?: ReadonlySet<string>;
+  /**
+   * The ToolPort owns approval (the Module 4 durable executor: its approval hook sees the gate's
+   * requirement and pauses the run). The interpreter then passes REQUIRE_APPROVAL to the port
+   * instead of halting. The port MUST honour `gate.decision` — the executor's tests assert it.
+   */
+  delegateApproval?: boolean;
   /** Names bound before the program runs, with their taint (the objective is TRUSTED). */
   inputs?: Record<string, { data: unknown; taint: Taint; sourceId?: string }>;
 }
@@ -61,7 +67,7 @@ export interface CallTrace {
   effect?: unknown;
 }
 
-export type RunStatus = 'completed' | 'awaiting_approval' | 'violated' | 'invalid' | 'failed';
+export type RunStatus = 'completed' | 'awaiting_approval' | 'awaiting_input' | 'held' | 'violated' | 'invalid' | 'failed';
 
 export interface RunResult {
   status: RunStatus;
@@ -75,6 +81,21 @@ export interface RunResult {
   error?: string;
   /** Deterministic trace digest: same program + same inputs → same digest. */
   traceDigest: string;
+}
+
+/**
+ * Thrown by a ToolPort (the durable executor's hook chain, Module 4) to PAUSE the run: a policy
+ * or approval hook needs a human, or a clarification is required. The interpreter reports it as
+ * the corresponding status; the orchestrator resumes by re-running the (deterministic) program.
+ */
+export class RunSuspended extends Error {
+  constructor(
+    readonly status: 'awaiting_approval' | 'awaiting_input' | 'held',
+    readonly pending: { nodeId: string; toolId: string; reason: string; argTaint: Taint },
+  ) {
+    super(pending.reason);
+    this.name = 'RunSuspended';
+  }
 }
 
 class Halt extends Error {
@@ -239,6 +260,10 @@ class Execution {
       if (e instanceof Halt) {
         status = e.status;
         error = e.message;
+      } else if (e instanceof RunSuspended) {
+        status = e.status;
+        error = e.message;
+        this.pending = e.pending;
       } else {
         status = 'failed';
         error = e instanceof Error ? e.message : String(e);
@@ -433,8 +458,8 @@ class Execution {
   private async violate(v: Omit<ViolationRecord, 'tenantId' | 'runId' | 'programRef'>): Promise<void> {
     const rec: ViolationRecord = { ...v, tenantId: this.ctx.tenantId, runId: this.ctx.runId, programRef: this.digest };
     this.violation = rec;
-    await this.deps.recorder.violation(rec);
-    await this.deps.pager?.page(rec).catch(() => undefined);
+    const fresh = await this.deps.recorder.violation(rec);
+    if (fresh !== false) await this.deps.pager?.page(rec).catch(() => undefined);
   }
 
   private async call(c: CallExpr, scope: Map<string, TaintedValue>, ctxTaint: Taint): Promise<TaintedValue> {
@@ -486,7 +511,7 @@ class Execution {
         reason = p.reason ?? 'policy requires approval';
       }
     }
-    if (needsApproval && this.ctx.mode === 'execute' && !this.ctx.approvedNodes?.has(c.id)) {
+    if (needsApproval && this.ctx.mode === 'execute' && !this.ctx.delegateApproval && !this.ctx.approvedNodes?.has(c.id)) {
       this.pending = { nodeId: c.id, toolId: c.tool, reason, argTaint: g.argTaint };
       throw new Halt('awaiting_approval', reason);
     }
@@ -496,7 +521,16 @@ class Execution {
     // shows nothing. It stays simulated if it needed approval — a read with untrusted
     // arguments that leaves the organization (a fetched URL) is egress, dry run or not.
     const mode = this.ctx.mode === 'simulate' && decl.reversibility === 'R0' && !needsApproval ? 'execute' : this.ctx.mode;
-    const res = await this.deps.tools.invoke({ tenantId: this.ctx.tenantId, runId: this.ctx.runId, nodeId: c.id, toolId: c.tool, args, mode });
+    const res = await this.deps.tools.invoke({
+      tenantId: this.ctx.tenantId,
+      runId: this.ctx.runId,
+      nodeId: c.id,
+      toolId: c.tool,
+      args,
+      mode,
+      declaration: decl,
+      gate: { decision: needsApproval ? 'REQUIRE_APPROVAL' : 'PROCEED', ...(needsApproval ? { reason } : {}), argTaint: g.argTaint, argTaints: traceEntry.argTaints },
+    });
     traceEntry.executed = mode === 'execute';
     traceEntry.ok = res.ok;
     if (!res.ok) {

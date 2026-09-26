@@ -213,3 +213,32 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}):
   }
   throw new ToolError('EGRESS_DENIED', 'too many redirects', { committed: 'no' });
 }
+
+export interface SafePostOptions {
+  timeoutMs?: number;
+  /** Tests only, as for safeFetch. */
+  addressPolicy?: (ip: string) => boolean;
+  lookup?: typeof dnsLookup;
+  allowedPorts?: number[];
+}
+
+/**
+ * An outbound webhook delivery (docs/module4.md §7): one POST to a customer-registered HTTPS
+ * URL, under the same public-address guard as safeFetch. No redirects are followed (a redirect
+ * is an easy way to aim a delivery at an internal address) and nothing of the response is
+ * returned but its status.
+ */
+export async function safePost(rawUrl: string, body: string, headers: Record<string, string>, options: SafePostOptions = {}): Promise<{ status: number }> {
+  const url = checkUrl(rawUrl, options.allowedPorts ?? [443]);
+  if (url.protocol !== 'https:' && !options.allowedPorts) throw new ToolError('EGRESS_DENIED', 'webhooks are delivered over https only', { committed: 'no' });
+  const dispatcher = guardedAgent(options.addressPolicy ?? isPublicAddress, options.lookup ?? dnsLookup);
+  try {
+    const res = await undiciFetch(url, { method: 'POST', redirect: 'manual', dispatcher, signal: AbortSignal.timeout(options.timeoutMs ?? 10_000), headers: { 'user-agent': 'agent-webhooks/1', ...headers }, body });
+    await res.body?.cancel();
+    return { status: res.status };
+  } catch (error) {
+    const code = (error as { cause?: { code?: string } }).cause?.code;
+    if (code === 'EGRESS_DENIED') throw new ToolError('EGRESS_DENIED', `${url.hostname} resolves to a non-public address`, { committed: 'no' });
+    throw new ToolError('TRANSIENT', `delivery to ${url.hostname} failed`, { committed: 'no', cause: error });
+  }
+}

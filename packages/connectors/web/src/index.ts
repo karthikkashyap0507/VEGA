@@ -3,7 +3,7 @@ import { SourcedSchema } from '@vega/contracts';
 import { defineTool, sourced, ToolError, type ConnectorDefinition, type ToolContext } from '@vega/connector-sdk';
 import { safeFetch, type FetchedPage } from './safe-fetch.js';
 
-export { safeFetch, isPublicAddress, ALLOWED_TYPES, type FetchedPage, type SafeFetchOptions } from './safe-fetch.js';
+export { safeFetch, safePost, isPublicAddress, ALLOWED_TYPES, type FetchedPage, type SafeFetchOptions, type SafePostOptions } from './safe-fetch.js';
 
 /**
  * Web fetch & search — docs/module2.md §5.2, §10.3.

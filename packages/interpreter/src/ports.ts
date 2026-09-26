@@ -7,15 +7,28 @@ import type { ToolDeclarationRecord, ToolResult } from '@vega/contracts';
  * results for M7's replay, and against in-memory fakes in the soundness and red-team suites.
  */
 
+export interface ToolInvocation {
+  tenantId: string;
+  runId: string;
+  nodeId: string;
+  toolId: string;
+  args: Record<string, unknown>;
+  mode: 'execute' | 'simulate';
+  /**
+   * What the gate concluded, for ports that run the Module 4 hook chain. Present on every call
+   * the interpreter makes; the gate has already refused violations before a port sees a call.
+   */
+  declaration?: ToolDeclarationRecord;
+  gate?: {
+    decision: 'PROCEED' | 'REQUIRE_APPROVAL';
+    reason?: string;
+    argTaint: Taint;
+    argTaints: Array<{ path: string; taint: Taint; dataTaint: Taint; sourceIds: readonly string[] }>;
+  };
+}
+
 export interface ToolPort {
-  invoke(input: {
-    tenantId: string;
-    runId: string;
-    nodeId: string;
-    toolId: string;
-    args: Record<string, unknown>;
-    mode: 'execute' | 'simulate';
-  }): Promise<ToolResult<unknown>>;
+  invoke(input: ToolInvocation): Promise<ToolResult<unknown>>;
 }
 
 export interface DeclarationPort {
@@ -100,7 +113,8 @@ export interface Recorder {
   program(p: ProgramRecord): Promise<void>;
   source(s: SourceRecord): Promise<void>;
   derivation(d: DerivationRecord): Promise<void>;
-  violation(v: ViolationRecord): Promise<void>;
+  /** Returns false if the violation was already recorded (replay): the caller must not page again. */
+  violation(v: ViolationRecord): Promise<void | boolean>;
 }
 
 /** Taint violations PAGE (docs/module3.md §4): they are incidents, not errors. */

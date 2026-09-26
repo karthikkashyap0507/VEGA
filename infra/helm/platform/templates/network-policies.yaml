@@ -10,6 +10,8 @@
       evidence    execution    NONE
       execution   evidence-db  NONE
       execution   web-fetch    fetch API only (module2.md §10.3)
+      control     web-fetch    webhook delivery only (module4.md §7)
+      control     model        planner / intent model endpoint, by name (module4.md §9)
       execution   extractor    extract API only (module3.md §3.1)
       extractor   anything     NOTHING but DNS and the model endpoint — no tools, no data, no web
       web-fetch   internet     80/443 to PUBLIC addresses only — private, link-local, loopback
@@ -173,6 +175,14 @@ spec:
     {{- with .Values.network.egress.oauthProviders }}
     {{- include "fqdnEgress" . | nindent 4 }}
     {{- end }}
+    # Module 4: the planner (C2) and intent model (C1) — the model endpoint, by name. They see
+    # only the principal's words and metadata (docs/module3.md §7.5), never content.
+    {{- with .Values.network.egress.modelGateway }}
+    {{- include "fqdnEgress" . | nindent 4 }}
+    {{- end }}
+    # Module 4: outbound webhooks are DELIVERED by the isolated web-fetch pod, not from here.
+    - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "web-fetch") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3005) | nindent 8 }}
 
 # ============================================================ execution
 ---
@@ -236,6 +246,9 @@ spec:
     - fromEntities: [host]
       toPorts: {{- include "tcp" (list 9000) | nindent 8 }}
     - fromEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3005) | nindent 8 }}
+    # Module 4: webhook delivery (/deliver) — signed by control, sent from here.
+    - fromEndpoints: {{- include "peer" (dict "ns" $co "app" "control") | nindent 8 }}
       toPorts: {{- include "tcp" (list 3005) | nindent 8 }}
   egress:
     - toCIDRSet:

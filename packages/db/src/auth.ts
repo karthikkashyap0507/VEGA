@@ -6,8 +6,9 @@ import { platformEvents, users } from './schema.js';
 /**
  * Typed wrappers for the two pre-tenant resolver functions (migrations/0002_identity.sql).
  *
- * These are the ONLY queries in the system that run without a tenant context, and they can
- * reach nothing but what the SECURITY DEFINER functions return. They live here, in the one
+ * These, and the work-discovery functions in scheduler.ts (Module 4), are the ONLY queries in
+ * the system that run without a tenant context, and they can reach nothing but what the
+ * SECURITY DEFINER functions return. They live here, in the one
  * package allowed a raw pool (DB-001), so the gateway never holds a connection it could
  * query freely.
  */

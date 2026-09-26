@@ -25,6 +25,8 @@ replicas: { web: 1, gateway: 1, control: 1, execution: 1, evidence: 1, web-fetch
 # Models (module3.md §9). The extractor reaches the model through the gateway only.
 models:
   extractor: claude-haiku-4-5-20251001
+  planner: claude-opus-5          # C2 (module4.md §9), pinned per run
+  routine: claude-sonnet-5        # C1 mention extraction
   gatewayUrl: ""        # LiteLLM URL; empty → the provider API directly (ANTHROPIC_API_KEY)
 
 # SearXNG (web.search) — an operator-run service; empty disables search.
@@ -45,8 +47,8 @@ mtls:
 # Each lives ONLY in its own plane's namespace. There is deliberately no key for the evidence
 # database anywhere under `execution`.
 secrets:
-  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*, EXECUTION_INTERNAL_TOKEN, CONNECTOR_STATE_SECRET, *_CLIENT_ID/SECRET
-  execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL, EXECUTION_INTERNAL_TOKEN, LOCAL_KEK_BASE64|KMS_*, VALKEY_URL, *_CLIENT_ID/SECRET
+  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*, EXECUTION_INTERNAL_TOKEN, CONNECTOR_STATE_SECRET, *_CLIENT_ID/SECRET, RUN_TOKEN_KEY_PEM (M4: signs run tokens), ANTHROPIC_API_KEY | LITELLM_MASTER_KEY (M4: planner)
+  execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL, EXECUTION_INTERNAL_TOKEN, LOCAL_KEK_BASE64|KMS_*, VALKEY_URL, *_CLIENT_ID/SECRET, DBOS_SYSTEM_DATABASE_URL (M4: the executor's own database), RUN_TOKEN_JWKS (M4: public keys only)
   # web-fetch gets NO Secret at all (module2.md §10.3).
   evidence: evidence-secrets     # EVIDENCE_DATABASE_URL, EVIDENCE_WRITER_URL, EVIDENCE_APPEND_TOKEN
   # The quarantined extractor gets its service token and a MODEL key — nothing else: no

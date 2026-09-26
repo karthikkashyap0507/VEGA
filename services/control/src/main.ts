@@ -1,6 +1,13 @@
 import { existsSync } from 'node:fs';
 import { createLogger, internalServerTls, loadTls, mtlsFetch, startHealthServer } from '@vega/shared';
-import { PgTokenVault } from '@vega/connector-sdk';
+import { PgTokenVault, sandboxFetch } from '@vega/connector-sdk';
+import { safePost } from '@vega/connector-web';
+import { AnthropicClient } from '@vega/llm';
+import { DevPlannerModel } from '@vega/planner';
+import { RunStore } from '@vega/runs';
+import { RunCoordinator, type WebhookDeliverer } from './agent/coordinator.js';
+import { heuristicMentions, llmMentions } from './agent/intent.js';
+import { loadRunTokenIssuer } from './agent/tokens.js';
 import { PgMcpToolStore } from '@vega/connector-mcp';
 import { launchRegistry, oauthClientsFromEnv } from '@vega/connectors';
 import { HttpExecutionClient } from './connectors/deps.js';
@@ -63,9 +70,12 @@ if (!tls) {
 // ---------------------------------------------------------------- connectors (Module 2)
 const executionToken = env['EXECUTION_INTERNAL_TOKEN'];
 const stateSecret = env['CONNECTOR_STATE_SECRET'] ?? env['SESSION_SECRET'];
+const sandboxUrl = env['CONNECTOR_SANDBOX_URL'];
+if (sandboxUrl && production) throw new Error('CONNECTOR_SANDBOX_URL is refused in production');
+if (sandboxUrl) logger.warn({ sandboxUrl }, 'DEV: OAuth token exchange goes to a SANDBOX provider');
 let connectors;
 if (executionToken && stateSecret) {
-  const oauthClients = oauthClientsFromEnv(env, env['GATEWAY_PUBLIC_URL'] ?? 'http://localhost:3001');
+  const oauthClients = oauthClientsFromEnv(env, env['GATEWAY_PUBLIC_URL'] ?? 'http://localhost:3001', sandboxUrl ? sandboxFetch(sandboxUrl) : undefined);
   connectors = {
     registry: launchRegistry(),
     oauthClients,
@@ -81,8 +91,51 @@ if (executionToken && stateSecret) {
   logger.warn('DEV: EXECUTION_INTERNAL_TOKEN or CONNECTOR_STATE_SECRET unset: connector procedures answer 503');
 }
 
+// ---------------------------------------------------------------- agent core (Module 4)
+// Model calls go through LiteLLM (D-12) when configured, else straight to the vendor API; with
+// neither, the development planner and mention heuristics stand in — loudly.
+const modelKey = env['LITELLM_MASTER_KEY'] || env['ANTHROPIC_API_KEY'];
+const modelBase = env['LITELLM_MASTER_KEY'] ? env['LITELLM_BASE_URL'] : undefined;
+const llm = modelKey ? new AnthropicClient({ apiKey: modelKey, ...(modelBase ? { baseUrl: modelBase } : {}) }) : undefined;
+if (!llm) {
+  if (production) throw new Error('a planner model is required in production (LITELLM_MASTER_KEY or ANTHROPIC_API_KEY)');
+  logger.warn('DEV: no model key: planning uses the DEVELOPMENT PLANNER (a fixed set of objective shapes) and heuristic entity mentions');
+}
+let agent;
+if (connectors) {
+  const issuer = await loadRunTokenIssuer(env, logger, production);
+  const webFetchUrl = env['WEB_FETCH_URL'];
+  const webhooks: WebhookDeliverer = webFetchUrl
+    ? {
+        async deliver(url, body, headers) {
+          const f = tls ? mtlsFetch(tls) : fetch;
+          const res = await f(`${webFetchUrl.replace(/\/$/, '')}/deliver`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, body, headers }) });
+          const j = (await res.json().catch(() => ({}))) as { status?: number; error?: { message: string } };
+          if (!res.ok) throw new Error(j.error?.message ?? `web-fetch ${res.status}`);
+          return { status: j.status ?? 0 };
+        },
+      }
+    : { deliver: (url, body, headers) => safePost(url, body, headers) };
+  if (!webFetchUrl && production) throw new Error('WEB_FETCH_URL is required in production: webhooks are delivered by the isolated fetcher');
+  const core = {
+    store: new RunStore(),
+    execution: connectors.execution,
+    registry: connectors.registry,
+    log: logger,
+    issuer,
+    webhooks,
+    mentions: llm ? llmMentions(llm, env['MODEL_ROUTINE'] ?? 'claude-sonnet-5') : heuristicMentions,
+    planning: llm
+      ? { execution: connectors.execution, llm, model: env['MODEL_PLANNER'] ?? 'claude-opus-5', source: 'planner' as const }
+      : { execution: connectors.execution, llm: new DevPlannerModel(), model: 'dev-planner', source: 'dev_planner' as const },
+  };
+  const coordinator = new RunCoordinator(core);
+  coordinator.start();
+  agent = { core, coordinator };
+}
+
 const app = await buildControlApp({
-  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}) },
+  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}) },
   verifier,
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });
