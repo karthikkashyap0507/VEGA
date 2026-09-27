@@ -9,6 +9,7 @@ import { FakeProviders, serveProviders } from '@vega/connector-testing';
  *   POST /__seed      { account, from, subject, body }  put a message in a mailbox
  *   GET  /__sent                                    every message actually sent
  *   GET  /__events?account=…                         calendar events
+ *   POST /__drafts    { account }                     drafts in a mailbox (Module 6: an undone draft is gone)
  *
  * Never deployed: the services refuse CONNECTOR_SANDBOX_URL in production.
  */
@@ -22,6 +23,7 @@ void serveProviders(providers.fetch, {
     if (path === '/__seed') return providers.google.seedMessage(b['account']!, { from: b['from']!, subject: b['subject']!, body: b['body']! });
     if (path === '/__sent') return providers.google.sent;
     if (path === '/__events') return providers.google.events(b['account'] ?? '');
+    if (path === '/__drafts') return providers.google.drafts(b['account'] ?? '').map((d) => ({ id: d.id, subject: d.message.headers['Subject'] ?? '', to: d.message.headers['To'] ?? '' }));
     return undefined;
   },
 }).then((server) => console.log(`sandbox providers listening on ${server.url}`));

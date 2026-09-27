@@ -162,10 +162,18 @@ spec:
     - toEndpoints:
         {{- include "peer" (dict "ns" $co "app" "openfga") | nindent 8 }}
       toPorts: {{- include "tcp" (list 8080) | nindent 8 }}
+    # Module 6: the fast revoke path reads precomputed revokers from Valkey.
+    - toEndpoints:
+        {{- include "peer" (dict "ns" $co "app" "valkey") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 6379) | nindent 8 }}
     {{- end }}
     {{- with .Values.network.egress.primaryDatabase }}
     - toCIDR: {{- include "cidrs" . }}
       toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
+    {{- end }}
+    {{- with .Values.network.egress.cache }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 6379) | nindent 8 }}
     {{- end }}
     {{- with .Values.network.egress.identityProvider }}
     - toCIDR: {{- include "cidrs" . }}

@@ -13,6 +13,7 @@ const SECTIONS = [
   { href: '/admin/security', label: 'Security' },
   { href: '/admin/policies', label: 'Policies' },
   { href: '/admin/risk', label: 'Risk' },
+  { href: '/admin/undo', label: 'Undo' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

@@ -64,6 +64,10 @@ export interface PendingAction {
   holdWindowMs?: number;
   heldAt?: string;
   releaseAt?: string;
+  /** Module 6: the hold row and the action row; `edited` once its content was changed in a hold. */
+  holdId?: string;
+  actionId?: string;
+  edited?: boolean;
   assumptions?: string[];
   ambiguity?: Ambiguity;
   connector?: string;

@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { argsDigest, idempotencyKeyFor, PgInvocationStore } from '@vega/connector-sdk';
 import { launchRegistry } from '@vega/connectors';
 import { FakeProviders } from '@vega/connector-testing';
@@ -13,6 +13,9 @@ import { connect, dbosUrl, executorKit, objectiveFor, ownerQuery, plannedRun, sa
  * (idempotency ledger included) and the provider fakes. docs/module4.md §11: hook ordering,
  * at-most-once for R2/R3, replan correctness, limits — all blocking.
  */
+
+// Real Postgres + DBOS: the 5 s default is too tight when the whole suite runs in parallel.
+vi.setConfig({ testTimeout: 30_000 });
 
 const SYSTEM_DB = 'vega_dbos_executor_test';
 const providers = new FakeProviders();

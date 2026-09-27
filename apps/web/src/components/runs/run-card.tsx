@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { ErrorText } from '@/components/error-text';
 import { ProvenanceChip } from '@/components/provenance/taint';
+import { BlastRadiusPanel } from '@/components/reversibility/blast-radius';
+import { RunUndo } from '@/components/reversibility/undo';
 import { Button } from '@/components/ui/button';
 import { runActions, runKeys, TERMINAL, useRun, useRunStream, type PendingAction } from '@/lib/runs';
 import { ActionCard } from './action-card';
@@ -61,6 +63,7 @@ export function RunCard({ runId }: { runId: string }) {
           ))}
         </p>
       ) : null}
+      {!TERMINAL.has(run.status) ? <BlastRadiusPanel runId={run.id} compact /> : null}
       {run.status === 'AWAITING_APPROVAL' && pending?.kind === 'approval' ? (
         <ActionCard action={pending} runId={run.id} busy={busy} onDecide={(d, note) => act(() => runActions.decide(run.id, d, note))()} />
       ) : null}
@@ -82,7 +85,7 @@ export function RunCard({ runId }: { runId: string }) {
           </Button>
         </div>
       ) : null}
-      {run.statusReason && (['FAILED', 'PLAN_REJECTED', 'CANCELLED', 'NEEDS_ATTENTION'].includes(run.status) || (run.status === 'HELD' && pending?.kind !== 'hold')) ? <p className="text-sm text-risk-critical">{run.statusReason}</p> : null}
+      {run.statusReason && (['FAILED', 'PLAN_REJECTED', 'CANCELLED', 'NEEDS_ATTENTION', 'COMPENSATED', 'COMPENSATION_FAILED'].includes(run.status) || (run.status === 'HELD' && pending?.kind !== 'hold')) ? <p className="text-sm text-risk-critical">{run.statusReason}</p> : null}
       {emits.length ? (
         <div className="grid gap-1" data-testid="run-result">
           {emits.map((e, i) => (
@@ -93,6 +96,7 @@ export function RunCard({ runId }: { runId: string }) {
           ))}
         </div>
       ) : null}
+      {TERMINAL.has(run.status) || run.status === 'COMPENSATING' || run.status === 'NEEDS_ATTENTION' ? <RunUndo runId={run.id} /> : null}
       {!TERMINAL.has(run.status) ? (
         <div>
           <Button size="sm" variant="ghost" onClick={act(() => runActions.cancel(run.id))} disabled={busy}>

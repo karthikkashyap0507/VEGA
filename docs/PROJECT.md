@@ -1863,6 +1863,7 @@ company if the per-connector economics do not work. Measure it explicitly from t
 | **D-12** | **C4 assigned to Module 5** and reclassified as existential below Teams | At $30/month, inference cost is the whole business, not a rounding error (§22.6) | 2026-08-22 |
 | **D-13** | **Durable execution on DBOS Transact (Postgres-native, MIT) for Phase 1**, behind `packages/orchestration`; the engine choice of D-06 is revisited, its principle (consume, don't build) stands | The module 4 evaluation (module4.md §9): one workflow per run, completed steps never re-run, durable messages and timers — on the Postgres we already operate, with no cluster to run. Our at-most-once guarantee lives in our own journal and the M2 ledger either way; the `Orchestrator` interface keeps a Temporal adapter a contained change | 2026-09-26 |
 | **D-14** | **The policy decision is made in the execution plane**: the engine (`packages/policy-engine` + `packages/risk`) runs in the executor's policy hook, with OPA and Presidio as execution-side services; authoring, compilation, simulation, signing and activation stay in the control plane, and the two meet only in object storage (signed bundles) and the database | module5.md §3 draws a control-plane "policy service", but invariant 1 forbids execution → control calls, and the decision sits on every step's critical path (p99 < 50 ms). Signed bundles keep the control plane the only author; OPA verifies before loading | 2026-09-27 |
+| **D-15** | **Compensators live with their connectors; the lifecycle is `packages/compensators`; holds are rows** — the `Compensator` contract is in the connector SDK (a compensator speaks its provider's API through the connector's credential) and every connector registers its own, refused at registration if an R1/R2 tool names one it does not ship; arming, TTLs, reverse ordering, retries, divergence, blast radius and Time-to-Undo are the library. Holds are settled by a compare-and-set on the hold row that a person's revoke and the timer race for; DBOS (D-13) replaces module6.md's Temporal timers | A compensator needs the tool's provider knowledge and credential; the lifecycle must not. The row, not an engine message, is the arbiter, so a revoke committed while no worker runs still wins, and a hold whose state cannot be read goes to NEEDS_ATTENTION instead of releasing | 2026-09-27 |
 
 ### Open — ranked by leverage
 
@@ -1870,7 +1871,11 @@ company if the per-connector economics do not work. Measure it explicitly from t
 2. **Name** (§3). Blocks anything public. *Due: Phase 0.*
 3. **Design partner.** Blocks Phase 1 entirely. *Due: Phase 0.*
 4. **Per-connector compensator economics.** Measure on connector #1; it determines whether the
-   moat is affordable.
+   moat is affordable. *First data (Module 6, against the provider fakes):* the launch set's
+   compensators are 30–160 lines per connector (Slack 32, Outlook 68, Gmail 74, SharePoint 81,
+   Drive 84, Calendar 156 — Calendar's complete-snapshot capture is the costly one), each with
+   harness scenarios. The expensive part is not the code but verifying provider semantics on live
+   sandbox tenants (§11.1 of module6.md), not yet done — the kill criterion stays open until it is.
 5. **Deployment posture for the beachhead** — will these buyers accept multi-tenant SaaS, or does
    Phase 1 need single-tenant? Affects infrastructure cost dramatically.
 6. **Do we ever hold the signing key?** Recommendation: no, for single-tenant and above. Confirm

@@ -96,6 +96,8 @@ export interface RollbackOutcome {
 
 const WINDOWLESS_HOLD_MS = 7 * 86_400_000;
 
+const CAPTURE_RATE_RETRIES = 3;
+
 export class ReversibilityEngine {
   constructor(readonly deps: EngineDeps) {}
 
@@ -109,7 +111,15 @@ export class ReversibilityEngine {
   async arm(ctx: StepContext): Promise<{ captured: boolean; ref?: string; holdOnly?: boolean }> {
     if (ctx.tool.reversibility === 'R0' || ctx.tool.reversibility === 'R3') return { captured: false };
     if (!ctx.connectorId) return { captured: false };
-    const out = await this.deps.port.capture({ tenantId: ctx.tenantId, connectorId: ctx.connectorId, toolId: ctx.toolId, args: ctx.args, runId: ctx.runId, nodeId: `v${ctx.programVersion}.${ctx.callSeq}` });
+    const input = { tenantId: ctx.tenantId, connectorId: ctx.connectorId, toolId: ctx.toolId, args: ctx.args, runId: ctx.runId, nodeId: `v${ctx.programVersion}.${ctx.callSeq}` };
+    let out = await this.deps.port.capture(input);
+    // The capture's read shares the connector's rate limit with the call itself: a local limit
+    // is a wait, not a reason to fail the run (bounded — the forward call would wait the same).
+    for (let i = 0; i < CAPTURE_RATE_RETRIES && !out.ok && out.error.code === 'RATE_LIMITED'; i++) {
+      const waitMs = Math.min(10, out.error.retryAfterSeconds ?? 1) * 1000;
+      await new Promise((r) => setTimeout(r, waitMs));
+      out = await this.deps.port.capture(input);
+    }
     if (!out.ok) throw new Error(`the undo for ${ctx.toolId} could not be prepared (${out.error.code}: ${out.error.message}); it was not called`);
     if (out.kind === 'hold_only') return { captured: false, ref: out.ref, holdOnly: true };
     const id = await this.deps.store.arm(ctx.tenantId, { runId: ctx.runId, nodeId: ctx.nodeRowId, connectorId: ctx.connectorId, token: out.token, compensator: out.compensator, description: out.description });

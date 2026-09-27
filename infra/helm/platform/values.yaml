@@ -47,8 +47,8 @@ mtls:
 # Each lives ONLY in its own plane's namespace. There is deliberately no key for the evidence
 # database anywhere under `execution`.
 secrets:
-  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*, EXECUTION_INTERNAL_TOKEN, CONNECTOR_STATE_SECRET, *_CLIENT_ID/SECRET, RUN_TOKEN_KEY_PEM (M4: signs run tokens), ANTHROPIC_API_KEY | LITELLM_MASTER_KEY (M4: planner), OPA_BUNDLE_SIGNING_KEY + S3_ENDPOINT/S3_REGION/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY (M5: signs and writes policy bundles)
-  execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL, EXECUTION_INTERNAL_TOKEN, LOCAL_KEK_BASE64|KMS_*, VALKEY_URL, *_CLIENT_ID/SECRET, DBOS_SYSTEM_DATABASE_URL (M4: the executor's own database), RUN_TOKEN_JWKS (M4: public keys only)
+  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*, EXECUTION_INTERNAL_TOKEN, CONNECTOR_STATE_SECRET, *_CLIENT_ID/SECRET, RUN_TOKEN_KEY_PEM (M4: signs run tokens), ANTHROPIC_API_KEY | LITELLM_MASTER_KEY (M4: planner), OPA_BUNDLE_SIGNING_KEY + S3_ENDPOINT/S3_REGION/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY (M5: signs and writes policy bundles), VALKEY_URL + PUSH_TOPIC_SECRET (M6: fast revoke path, push topics)
+  execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL, EXECUTION_INTERNAL_TOKEN, LOCAL_KEK_BASE64|KMS_*, VALKEY_URL, *_CLIENT_ID/SECRET, DBOS_SYSTEM_DATABASE_URL (M4: the executor's own database), RUN_TOKEN_JWKS (M4: public keys only), PUSH_TOPIC_SECRET + NTFY_URL + GATEWAY_PUBLIC_URL (M6: held-action pushes with a one-tap revoke, incident pages)
   # web-fetch gets NO Secret at all (module2.md §10.3).
   evidence: evidence-secrets     # EVIDENCE_DATABASE_URL, EVIDENCE_WRITER_URL, EVIDENCE_APPEND_TOKEN
   # The quarantined extractor gets its service token and a MODEL key — nothing else: no

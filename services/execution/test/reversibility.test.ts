@@ -72,7 +72,10 @@ const until = (runId: string, want: RunStatus[], ms = 30_000) =>
   waitFor(async () => {
     const v = await kit.store.view(t.tenantId, runId);
     return v && want.includes(v.status) ? v : null;
-  }, ms, `run ${runId} to reach ${want.join('|')}`);
+  }, ms, `run ${runId} to reach ${want.join('|')}`).catch(async (e: Error) => {
+    const v = await kit.store.view(t.tenantId, runId);
+    throw new Error(`${e.message} (it is ${v?.status}${v?.statusReason ? `: ${v.statusReason}` : ''})`);
+  });
 const start = (runId: string) => orchestrator.start(RUN_WORKFLOW, runId, { tenantId: t.tenantId, runId });
 const live = () => providers.google.events(t.email).filter((e) => e.status !== 'cancelled');
 const create = (summary: string, attendee = 'guest@partner.example') => `call gcal.create({ summary: "${summary}", start: "2026-11-02T09:00:00Z", end: "2026-11-02T09:30:00Z", attendees: ["${attendee}"] })`;

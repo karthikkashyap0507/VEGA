@@ -120,7 +120,7 @@ jobs:
         run: pnpm --filter @vega/db test:isolation
 
   e2e:
-    name: E2E — sign in, invite, workspace, agent, connectors, plan sandbox, chat runs, policy console (real IdP, real browser, real OPA)
+    name: E2E — sign in, invite, workspace, agent, connectors, plan sandbox, chat runs, policy console, holds and undo (real IdP, real browser, real OPA)
     runs-on: ubuntu-latest
     needs: [quality]
     steps:
@@ -150,6 +150,8 @@ jobs:
           sed -i "s#^GOOGLE_CLIENT_ID=.*#GOOGLE_CLIENT_ID=e2e-google-client#; s#^GOOGLE_CLIENT_SECRET=.*#GOOGLE_CLIENT_SECRET=e2e-google-secret#" .env
           # Module 4: every provider call goes to the sandbox provider (the fakes over HTTP).
           echo "CONNECTOR_SANDBOX_URL=http://127.0.0.1:3099" >> .env
+          # Module 6: held actions are pushed (NTFY_URL; the E2E suite plays the phone) with a one-tap revoke.
+          echo "PUSH_TOPIC_SECRET=$(openssl rand -hex 24)" >> .env
       - name: Policy distribution (Module 5) — signing key, OPA configuration, signed baseline bundles, then OPA
         run: |
           pnpm db:migrate
@@ -337,11 +339,35 @@ jobs:
         run: npx vitest run services/control/test/policies.test.ts
 
   compensator-correctness:
-    name: 'Compensator correctness — BLOCKING (enable in M6)'
+    name: 'Reversibility — compensators, sagas, holds, undo API (BLOCKING, module6.md §11)'
     runs-on: ubuntu-latest
-    if: false
+    needs: [quality]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - run: echo "A connector cannot register without a tested compensator."
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: OpenFGA (service containers cannot pass `run`)
+        run: docker run -d --name openfga -p 8081:8080 openfga/openfga:v1.21.0 run
+      - name: Database roles and schema
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/docker/initdb/primary/01-roles.sql
+          pnpm db:migrate
+      - name: Wait for OpenFGA
+        run: for i in $(seq 1 30); do curl -sf localhost:8081/healthz && break; sleep 1; done
+      - name: 'Compensator correctness against the sandbox providers: every R1/R2 tool covered, state restored, idempotent (≥ 99%)'
+        run: npx vitest run evals/compensation packages/compensators
+      - name: 'The executor: capture before the call, the saga in reverse order, incidents, divergence abort, holds (timer ±1 s, restart, edit)'
+        run: npx vitest run services/execution/test/reversibility.test.ts
+      - name: 'The undo API: revoke asymmetry, the one-tap capability, confirmation, expiry'
+        run: npx vitest run services/control/test/reversibility.test.ts
 
   chain-integrity:
     name: 'Audit chain integrity — P0 (enable in M7)'

@@ -6,6 +6,8 @@ import { ProvenanceGraph, type GraphNode } from '@/components/provenance/provena
 import { ProvenanceChip } from '@/components/provenance/taint';
 import { RiskExplanation } from '@/components/policy/risk-explanation';
 import { ActionCard } from '@/components/runs/action-card';
+import { BlastRadiusPanel } from '@/components/reversibility/blast-radius';
+import { RunUndo } from '@/components/reversibility/undo';
 import { ProgramViewer } from '@/components/runs/program-viewer';
 import { RunTimeline } from '@/components/runs/run-timeline';
 import { StreamingStatus } from '@/components/runs/status';
@@ -85,7 +87,16 @@ export default function RunInspectorPage() {
           <TabsTrigger value="replans">Replans ({d.replans.length})</TabsTrigger>
           <TabsTrigger value="actions">Actions ({d.actions.length})</TabsTrigger>
           <TabsTrigger value="policy">Policy ({evaluations.data?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="effects">Effects</TabsTrigger>
+          <TabsTrigger value="undo">Undo</TabsTrigger>
         </TabsList>
+        <TabsContent value="effects">
+          <BlastRadiusPanel runId={run.id} />
+        </TabsContent>
+        <TabsContent value="undo">
+          <RunUndo runId={run.id} />
+          <p className="mt-2 text-xs text-muted">Emails that were sent cannot be undone: they could only be stopped while they were held.</p>
+        </TabsContent>
         <TabsContent value="policy">
           <div className="grid gap-2" data-testid="run-evaluations">
             {evaluations.data?.length ? (
