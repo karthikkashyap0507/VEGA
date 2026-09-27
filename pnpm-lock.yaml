@@ -157,6 +157,34 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  evals/compensation:
+    dependencies:
+      '@vega/compensators':
+        specifier: workspace:*
+        version: link:../../packages/compensators
+      '@vega/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connectors/sdk
+      '@vega/connector-testing':
+        specifier: workspace:*
+        version: link:../../packages/connectors/testing
+      '@vega/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors/registry
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@vega/eval-simulation':
+        specifier: workspace:*
+        version: link:../simulation
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
   evals/intent:
     dependencies:
       '@vega/connectors':
@@ -221,6 +249,9 @@ importers:
 
   evals/simulation:
     dependencies:
+      '@vega/compensators':
+        specifier: workspace:*
+        version: link:../../packages/compensators
       '@vega/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connectors/sdk
@@ -279,7 +310,30 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
-  packages/compensators: {}
+  packages/compensators:
+    dependencies:
+      '@vega/connector-sdk':
+        specifier: workspace:*
+        version: link:../connectors/sdk
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@vega/db':
+        specifier: workspace:*
+        version: link:../db
+      '@vega/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
+    devDependencies:
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
   packages/connectors/gcal:
     dependencies:

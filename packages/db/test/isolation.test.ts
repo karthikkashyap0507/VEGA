@@ -60,6 +60,13 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'policy_evaluations', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
   { table: 'risk_evaluations', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
   { table: 'risk_weights', idColumn: 'version', tenantColumn: 'tenant_id', appendOnly: true, shared: 'tenant_id IS NULL' },
+  { table: 'rollbacks', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'compensations', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'holds', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'blast_radius', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'divergences', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'undo_metrics', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'incidents', idColumn: 'id', tenantColumn: 'tenant_id' },
 ];
 
 let appPool: pg.Pool;

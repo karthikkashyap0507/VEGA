@@ -3,11 +3,16 @@ import { SourcedSchema } from '@vega/contracts';
 import {
   Address,
   allRecipients,
+  DAY_MS,
+  defineCompensator,
+  defineHoldOnly,
   defineTool,
   externalOnly,
+  forwardDetail,
   htmlToText,
   rawMessage,
   sourced,
+  ToolError,
   type ConnectorDefinition,
   type ToolContext,
 } from '@vega/connector-sdk';
@@ -399,12 +404,87 @@ export const label = defineTool({
   },
 });
 
+// ------------------------------------------------------------------ compensators (docs/module6.md §5.4)
+
+const gone = (e: unknown) => e instanceof ToolError && e.code === 'NOT_FOUND';
+
+/** Deletes the draft a `gmail.draft` created. EXACT and SILENT: a draft was never sent. */
+export const draftDelete = defineCompensator<z.infer<typeof Outgoing>, { messageId: string | null }>({
+  ref: 'gmail.draft.delete',
+  toolId: 'gmail.draft',
+  confidence: 'EXACT',
+  sideEffects: 'SILENT',
+  ttlMs: 30 * DAY_MS,
+  describe: (t) => `Deletes the draft “${t.args.subject}”. It was never sent, so nobody else is affected.`,
+  // The Message-ID the draft will carry (derived from the call's idempotency key): how the draft
+  // is found if the executor stopped before it learned the draft's id.
+  async capture(_args, ctx) {
+    return { messageId: messageIdFor(ctx) ?? null };
+  },
+  async compensate(t, ctx) {
+    let draftId = forwardDetail<{ draftId: string | null }>(t)?.draftId ?? t.forward?.providerRef ?? null;
+    if (!draftId && !t.forward && t.pre.messageId) {
+      const found = await ctx.http.json<{ drafts?: Array<{ id: string }> }>(`${BASE}/drafts`, { query: { q: `rfc822msgid:${t.pre.messageId}` } });
+      draftId = found.drafts?.[0]?.id ?? null;
+      if (!draftId) return { outcome: 'not_needed', summary: 'No draft had been created, so there was nothing to delete.', notified: [] };
+    }
+    if (!draftId) throw new ToolError('NOT_FOUND', 'the draft’s id is unknown', { committed: 'no' });
+    try {
+      await ctx.http.json(`${BASE}/drafts/${encodeURIComponent(draftId)}`, { method: 'DELETE' });
+    } catch (e) {
+      if (gone(e)) return { outcome: 'already_restored', summary: `The draft “${t.args.subject}” was already deleted.`, notified: [] };
+      throw e;
+    }
+    return { outcome: 'restored', summary: `Deleted the draft “${t.args.subject}”.`, notified: [] };
+  },
+});
+
+/** An email cannot be unsent: the hold window is its only undo (docs/module6.md §5.4). */
+export const sendRecall = defineHoldOnly({
+  ref: 'gmail.send.recall',
+  toolId: 'gmail.send',
+  explanation: 'An email cannot be unsent. It can only be stopped while it is held, before it is released.',
+});
+
+/** Takes back the labels a `gmail.label` added — only those it added, only if still there. */
+export const labelRemove = defineCompensator<{ messageId: string; labelIds: string[] }, { labelIds: string[] }>({
+  ref: 'gmail.label.remove',
+  toolId: 'gmail.label',
+  confidence: 'EXACT',
+  sideEffects: 'SILENT',
+  ttlMs: 30 * DAY_MS,
+  describe: (t) => {
+    const added = t.args.labelIds.filter((l) => !t.pre.labelIds.includes(l));
+    return added.length ? `Removes the label${added.length > 1 ? 's' : ''} ${added.join(', ')} from the message again.` : 'Nothing to undo: the message already had these labels.';
+  },
+  async capture(args, ctx) {
+    const m = await ctx.http.json<GmailMessage>(`${BASE}/messages/${encodeURIComponent(args.messageId)}`, { query: { format: 'minimal' } });
+    return { labelIds: m.labelIds ?? [] };
+  },
+  async compensate(t, ctx) {
+    const added = t.args.labelIds.filter((l) => !t.pre.labelIds.includes(l));
+    if (!added.length) return { outcome: 'not_needed', summary: 'The message already had these labels; nothing was added.', notified: [] };
+    let now: string[];
+    try {
+      now = (await ctx.http.json<GmailMessage>(`${BASE}/messages/${encodeURIComponent(t.args.messageId)}`, { query: { format: 'minimal' } })).labelIds ?? [];
+    } catch (e) {
+      if (gone(e)) return { outcome: 'already_restored', summary: 'The message no longer exists; there is no label to remove.', notified: [] };
+      throw e;
+    }
+    const remove = added.filter((l) => now.includes(l));
+    if (!remove.length) return { outcome: 'already_restored', summary: `The label${added.length > 1 ? 's were' : ' was'} already removed.`, notified: [] };
+    await ctx.http.json(`${BASE}/messages/${encodeURIComponent(t.args.messageId)}/modify`, { method: 'POST', json: { removeLabelIds: remove } });
+    return { outcome: 'restored', summary: `Removed ${remove.join(', ')} from the message.`, notified: [] };
+  },
+});
+
 export const gmail: ConnectorDefinition = {
   kind: 'gmail',
   displayName: 'Gmail',
   provider: 'google',
   apiBase: 'https://gmail.googleapis.com',
   tools: [search, read, draft, send, label],
+  compensators: [draftDelete, sendRecall, labelRemove],
   neverDoes: ['Delete messages', 'Change your mail settings or filters', 'Forward mail automatically'],
   async health(ctx) {
     const started = Date.now();

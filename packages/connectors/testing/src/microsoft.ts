@@ -21,13 +21,25 @@ interface GItem {
   content: string;
   cTag: string;
   permissions: Array<{ id: string; email: string; role: string }>;
+  /** Version history, oldest first; the last one is the current content. */
+  versions: Array<{ id: string; content: string; lastModifiedDateTime: string }>;
+}
+
+export interface GEvent {
+  id: string;
+  subject: string;
+  transactionId?: string;
+  attendees: string[];
+  isCancelled?: boolean;
 }
 
 export class FakeMicrosoft {
   readonly messages = new Map<string, Map<string, GMsg>>();
   readonly sent: Array<{ account: string; subject: string; to: string[]; headers: Array<{ name: string; value: string }> }> = [];
-  readonly events = new Map<string, { id: string; subject: string; transactionId?: string; attendees: string[] }>();
+  readonly events = new Map<string, GEvent>();
   readonly items = new Map<string, GItem>();
+  /** Invitations and cancellations Exchange sent to other people. */
+  readonly notifications: Array<{ account: string; kind: 'invitation' | 'cancellation' | 'share'; resourceId: string; to: string[] }> = [];
 
   constructor(readonly core: FakeCore) {}
 
@@ -54,10 +66,28 @@ export class FakeMicrosoft {
     return id;
   }
 
-  seedItem(driveId: string, name: string, content: string) {
+  seedItem(driveId: string, name: string, content: string, opts: { sharedWith?: string[] } = {}) {
     const id = this.core.id('01');
-    this.items.set(`${driveId}/${id}`, { id, name, content, cTag: this.core.id('ctag'), permissions: [] });
+    this.items.set(`${driveId}/${id}`, {
+      id,
+      name,
+      content,
+      cTag: this.core.id('ctag'),
+      permissions: (opts.sharedWith ?? []).map((email) => ({ id: this.core.id('perm'), email, role: 'read' })),
+      versions: [{ id: '1.0', content, lastModifiedDateTime: new Date().toISOString() }],
+    });
     return id;
+  }
+
+  item(driveId: string, itemId: string): GItem | undefined {
+    return this.items.get(`${driveId}/${itemId}`);
+  }
+
+  /** A new current version (a content write or a restore). */
+  private newVersion(item: GItem, content: string): void {
+    item.content = content;
+    item.cTag = this.core.id('ctag');
+    item.versions.push({ id: `${item.versions.length + 1}.0`, content, lastModifiedDateTime: new Date().toISOString() });
   }
 
   async handle(req: Request, url: URL): Promise<Response | undefined> {
@@ -138,14 +168,65 @@ export class FakeMicrosoft {
       // Graph's documented idempotency: a repeated transactionId returns the existing event.
       const existing = body.transactionId ? [...this.events.values()].find((e) => e.transactionId === body.transactionId) : undefined;
       if (existing) return json(201, existing);
-      const ev = {
+      const ev: GEvent = {
         id: this.core.id('AAMkE'),
         subject: body.subject,
         ...(body.transactionId ? { transactionId: body.transactionId } : {}),
         attendees: (body.attendees ?? []).map((a) => a.emailAddress.address),
       };
       this.events.set(ev.id, ev);
+      if (ev.attendees.length) this.notifications.push({ account: g.account, kind: 'invitation', resourceId: ev.id, to: ev.attendees.map((a) => a.toLowerCase()) });
       return json(201, ev);
+    }
+    const event = path.match(/^\/me\/events\/([^/]+)(\/cancel)?$/);
+    if (event) {
+      const g = auth(method === 'GET' ? ['Calendars.Read', 'Calendars.ReadWrite'] : ['Calendars.ReadWrite']);
+      if (g instanceof Response) return g;
+      const ev = this.events.get(decodeURIComponent(event[1]!));
+      if (!ev || ev.isCancelled) return json(404, { error: { code: 'ErrorItemNotFound', message: 'The specified object was not found in the store.' } });
+      if (method === 'GET' && !event[2]) return json(200, ev);
+      // Only the organizer can cancel; attendees get a cancellation (the comment is included).
+      if ((method === 'POST' && event[2]) || (method === 'DELETE' && !event[2])) {
+        ev.isCancelled = true;
+        if (ev.attendees.length) this.notifications.push({ account: g.account, kind: 'cancellation', resourceId: ev.id, to: ev.attendees.map((a) => a.toLowerCase()) });
+        return new Response(null, { status: method === 'POST' ? 202 : 204 });
+      }
+    }
+    const sub = path.match(/^\/drives\/([^/]+)\/items\/([^/]+)\/(versions|permissions)(?:\/([^/]+))?(\/content|\/restoreVersion)?$/);
+    if (sub) {
+      const g = auth(method === 'GET' ? ['Files.Read.All', 'Files.ReadWrite.All'] : ['Files.ReadWrite.All']);
+      if (g instanceof Response) return g;
+      const it = this.items.get(`${decodeURIComponent(sub[1]!)}/${decodeURIComponent(sub[2]!)}`);
+      if (!it) return json(404, { error: { code: 'itemNotFound', message: 'The resource could not be found.' } });
+      const id = sub[4] ? decodeURIComponent(sub[4]) : undefined;
+      if (sub[3] === 'versions') {
+        if (!id && method === 'GET') return json(200, { value: [...it.versions].reverse().map((v) => ({ id: v.id, lastModifiedDateTime: v.lastModifiedDateTime, size: Buffer.byteLength(v.content) })) });
+        const v = it.versions.find((x) => x.id === id);
+        if (!v) return json(404, { error: { code: 'itemNotFound', message: 'version not found' } });
+        if (sub[5] === '/content' && method === 'GET') return new Response(v.content, { status: 200, headers: { 'content-type': 'text/plain' } });
+        if (sub[5] === '/restoreVersion' && method === 'POST') {
+          this.newVersion(it, v.content);
+          return new Response(null, { status: 204 });
+        }
+        if (method === 'GET') return json(200, { id: v.id, lastModifiedDateTime: v.lastModifiedDateTime, size: Buffer.byteLength(v.content) });
+      }
+      if (sub[3] === 'permissions') {
+        const view = (p: GItem['permissions'][number]) => ({ id: p.id, roles: [p.role], grantedToV2: { user: { email: p.email } } });
+        if (!id && method === 'GET') return json(200, { value: it.permissions.map(view) });
+        const p = it.permissions.find((x) => x.id === id);
+        if (!p) return json(404, { error: { code: 'itemNotFound', message: 'permission not found' } });
+        if (method === 'GET') return json(200, view(p));
+        if (method === 'DELETE') {
+          it.permissions = it.permissions.filter((x) => x.id !== id);
+          return new Response(null, { status: 204 });
+        }
+        if (method === 'PATCH') {
+          const body = (await req.json()) as { roles?: string[] };
+          if (body.roles?.[0]) p.role = body.roles[0];
+          return json(200, view(p));
+        }
+      }
+      return json(405, { error: { code: 'BadRequest', message: `no route ${method} ${path}` } });
     }
     const drive = path.match(/^\/drives\/([^/]+)\/items\/([^/]+)(\/content|\/invite)?$/);
     if (drive) {
@@ -157,17 +238,23 @@ export class FakeMicrosoft {
       if (!item) return json(404, { error: { code: 'itemNotFound', message: 'The resource could not be found.' } });
       if (drive[3] === '/content' && method === 'GET') return new Response(item.content, { status: 200, headers: { 'content-type': 'text/plain' } });
       if (drive[3] === '/content' && method === 'PUT') {
-        item.content = await req.text();
-        item.cTag = this.core.id('ctag');
+        this.newVersion(item, await req.text());
         return json(200, { id: item.id, name: item.name, size: Buffer.byteLength(item.content), cTag: item.cTag });
       }
       if (drive[3] === '/invite' && method === 'POST') {
-        const body = (await req.json()) as { recipients: Array<{ email: string }>; roles: string[] };
+        const body = (await req.json()) as { recipients: Array<{ email: string }>; roles: string[]; sendInvitation?: boolean };
         const value = body.recipients.map((r) => {
+          // Inviting someone who already has access updates their existing permission.
+          const existing = item.permissions.find((x) => x.email.toLowerCase() === r.email.toLowerCase());
+          if (existing) {
+            existing.role = body.roles[0] ?? existing.role;
+            return { id: existing.id, roles: [existing.role] };
+          }
           const p = { id: this.core.id('perm'), email: r.email, role: body.roles[0] ?? 'read' };
           item.permissions.push(p);
           return { id: p.id, roles: [p.role] };
         });
+        if (body.sendInvitation !== false) this.notifications.push({ account: g.account, kind: 'share', resourceId: item.id, to: body.recipients.map((r) => r.email.toLowerCase()) });
         return json(200, { value });
       }
       return json(200, { id: item.id, name: item.name, size: Buffer.byteLength(item.content), cTag: item.cTag, file: { mimeType: 'text/plain' } });

@@ -1,0 +1,316 @@
+{
+  "generatedAt": "2026-09-27T10:36:14.986Z",
+  "sandbox": "fake",
+  "threshold": 0.99,
+  "scenarios": 16,
+  "passed": 16,
+  "successRate": 1,
+  "coverage": [
+    {
+      "toolId": "gcal.create",
+      "reversibility": "R1",
+      "ref": "gcal.event.delete",
+      "kind": "compensator",
+      "scenarios": 2
+    },
+    {
+      "toolId": "gcal.delete",
+      "reversibility": "R1",
+      "ref": "gcal.event.recreate",
+      "kind": "compensator",
+      "scenarios": 1
+    },
+    {
+      "toolId": "gcal.update",
+      "reversibility": "R1",
+      "ref": "gcal.event.restore",
+      "kind": "compensator",
+      "scenarios": 1
+    },
+    {
+      "toolId": "gdrive.share",
+      "reversibility": "R1",
+      "ref": "gdrive.permission.revoke",
+      "kind": "compensator",
+      "scenarios": 2
+    },
+    {
+      "toolId": "gdrive.write",
+      "reversibility": "R1",
+      "ref": "gdrive.revision.restore",
+      "kind": "compensator",
+      "scenarios": 1
+    },
+    {
+      "toolId": "gmail.draft",
+      "reversibility": "R1",
+      "ref": "gmail.draft.delete",
+      "kind": "compensator",
+      "scenarios": 2
+    },
+    {
+      "toolId": "gmail.label",
+      "reversibility": "R1",
+      "ref": "gmail.label.remove",
+      "kind": "compensator",
+      "scenarios": 1
+    },
+    {
+      "toolId": "gmail.send",
+      "reversibility": "R2",
+      "ref": "gmail.send.recall",
+      "kind": "hold-only",
+      "scenarios": 0
+    },
+    {
+      "toolId": "outlook.draft",
+      "reversibility": "R1",
+      "ref": "outlook.draft.delete",
+      "kind": "compensator",
+      "scenarios": 1
+    },
+    {
+      "toolId": "outlook.event_create",
+      "reversibility": "R1",
+      "ref": "outlook.event.delete",
+      "kind": "compensator",
+      "scenarios": 1
+    },
+    {
+      "toolId": "outlook.send",
+      "reversibility": "R2",
+      "ref": "outlook.send.recall",
+      "kind": "hold-only",
+      "scenarios": 0
+    },
+    {
+      "toolId": "sharepoint.share",
+      "reversibility": "R1",
+      "ref": "sharepoint.permission.revoke",
+      "kind": "compensator",
+      "scenarios": 2
+    },
+    {
+      "toolId": "sharepoint.write",
+      "reversibility": "R1",
+      "ref": "sharepoint.version.restore",
+      "kind": "compensator",
+      "scenarios": 1
+    },
+    {
+      "toolId": "slack.post",
+      "reversibility": "R2",
+      "ref": "slack.message.delete",
+      "kind": "compensator",
+      "scenarios": 1
+    }
+  ],
+  "uncovered": [],
+  "results": [
+    {
+      "scenario": "delete the draft it created",
+      "toolId": "gmail.draft",
+      "ref": "gmail.draft.delete",
+      "ok": true,
+      "failures": [],
+      "durationMs": 16,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "find and delete a draft whose creation was never recorded",
+      "toolId": "gmail.draft",
+      "ref": "gmail.draft.delete",
+      "ok": true,
+      "failures": [],
+      "durationMs": 5,
+      "outcome": "restored",
+      "secondOutcome": "not_needed",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "remove only the labels it added",
+      "toolId": "gmail.label",
+      "ref": "gmail.label.remove",
+      "ok": true,
+      "failures": [],
+      "durationMs": 6,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "delete a created event and cancel it for the attendees",
+      "toolId": "gcal.create",
+      "ref": "gcal.event.delete",
+      "ok": true,
+      "failures": [],
+      "durationMs": 7,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [
+        "c@partner.example",
+        "me@acme.example"
+      ],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "find and delete an event whose creation was never recorded (deterministic id)",
+      "toolId": "gcal.create",
+      "ref": "gcal.event.delete",
+      "ok": true,
+      "failures": [],
+      "durationMs": 5,
+      "outcome": "restored",
+      "secondOutcome": "not_needed",
+      "notified": [
+        "c@partner.example"
+      ],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "restore every field of an updated event, not just the changed ones",
+      "toolId": "gcal.update",
+      "ref": "gcal.event.restore",
+      "ok": true,
+      "failures": [],
+      "durationMs": 7,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [
+        "a@acme.example",
+        "x@partner.example"
+      ],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "recreate a cancelled event from its complete snapshot and re-invite",
+      "toolId": "gcal.delete",
+      "ref": "gcal.event.recreate",
+      "ok": true,
+      "failures": [],
+      "durationMs": 4,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [
+        "x@partner.example"
+      ],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "put the previous revision’s content back",
+      "toolId": "gdrive.write",
+      "ref": "gdrive.revision.restore",
+      "ok": true,
+      "failures": [],
+      "durationMs": 5,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "revoke access it granted",
+      "toolId": "gdrive.share",
+      "ref": "gdrive.permission.revoke",
+      "ok": true,
+      "failures": [],
+      "durationMs": 5,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "restore the role of someone who already had access (never revoke it)",
+      "toolId": "gdrive.share",
+      "ref": "gdrive.permission.revoke",
+      "ok": true,
+      "failures": [],
+      "durationMs": 5,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "delete the draft it created",
+      "toolId": "outlook.draft",
+      "ref": "outlook.draft.delete",
+      "ok": true,
+      "failures": [],
+      "durationMs": 4,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "cancel the meeting it created",
+      "toolId": "outlook.event_create",
+      "ref": "outlook.event.delete",
+      "ok": true,
+      "failures": [],
+      "durationMs": 4,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [
+        "c@partner.example"
+      ],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "restore the previous version with Graph’s restoreVersion",
+      "toolId": "sharepoint.write",
+      "ref": "sharepoint.version.restore",
+      "ok": true,
+      "failures": [],
+      "durationMs": 5,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "remove access it granted",
+      "toolId": "sharepoint.share",
+      "ref": "sharepoint.permission.revoke",
+      "ok": true,
+      "failures": [],
+      "durationMs": 4,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "restore the role of someone who already had access",
+      "toolId": "sharepoint.share",
+      "ref": "sharepoint.permission.revoke",
+      "ok": true,
+      "failures": [],
+      "durationMs": 2,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    },
+    {
+      "scenario": "delete a released message",
+      "toolId": "slack.post",
+      "ref": "slack.message.delete",
+      "ok": true,
+      "failures": [],
+      "durationMs": 8,
+      "outcome": "restored",
+      "secondOutcome": "already_restored",
+      "notified": [],
+      "writesOnSecondRun": 0
+    }
+  ],
+  "ok": true
+}

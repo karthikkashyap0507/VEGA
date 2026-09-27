@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ConnectorStatus, Effect, ToolResult } from '@vega/contracts';
 import { EffectSchema } from '@vega/contracts';
 import { trace } from '@opentelemetry/api';
+import { isHoldOnly, type CompensationConfidence, type CompensationResult, type CompensationSideEffects, type CompensationToken, type Compensator } from './compensator.js';
 import type { AnyTool, ConnectorDefinition, ToolContext } from './connector.js';
 import { ToolError } from './errors.js';
 import { ProviderHttp } from './http.js';
@@ -107,6 +108,23 @@ export interface InvokeInput {
   runId?: string | undefined;
   nodeId?: string | undefined;
 }
+
+/** What the lifecycle (packages/compensators) needs to know about a compensator. */
+export interface CompensatorInfo {
+  ref: string;
+  toolId: string;
+  confidence: CompensationConfidence;
+  sideEffects: CompensationSideEffects;
+  ttlMs: number;
+}
+
+export type CaptureOutcome =
+  | { ok: true; kind: 'armed'; token: CompensationToken; compensator: CompensatorInfo; description: string }
+  /** An R2 tool whose only undo is its hold window (an email cannot be unsent). */
+  | { ok: true; kind: 'hold_only'; ref: string; explanation: string }
+  | Extract<ToolResult<unknown>, { ok: false }>;
+
+export type CompensateOutcome = { ok: true; result: CompensationResult } | Extract<ToolResult<unknown>, { ok: false }>;
 
 const DEFAULT_BUCKET: BucketSpec = { capacity: 20, refillPerSecond: 5 };
 const REFRESH_SKEW_MS = 60_000;
@@ -339,6 +357,89 @@ export class ConnectorRuntime {
           await this.deps.connectors.event(input.tenantId, input.connectorId, 'rate_limited', { toolId: input.toolId }).catch(() => undefined);
         }
         return this.failure(error);
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------ compensation (Module 6)
+
+  private compensatorOf(tool: AnyTool): Compensator | { holdOnly: true; ref: string; explanation: string } {
+    const c = this.deps.registry.compensatorFor(tool);
+    if (!c) throw new ToolError('NOT_FOUND', `${tool.toolId} has no compensator`, { committed: 'no' });
+    return isHoldOnly(c) ? { holdOnly: true, ref: c.ref, explanation: c.explanation } : c;
+  }
+
+  /**
+   * capture(): BEFORE the forward call (the executor's captureCompensator hook), with the same
+   * arguments and — for a KEYED tool — the same idempotency key the call will carry, so a
+   * compensator can predict provider ids derived from it. Reads only; never claims the key.
+   */
+  async capture(input: InvokeInput): Promise<CaptureOutcome> {
+    return this.tracer.startActiveSpan(`capture ${input.toolId}`, async (span) => {
+      span.setAttributes({ tool_id: input.toolId, connector_id: input.connectorId, ...(input.runId ? { run_id: input.runId } : {}) });
+      try {
+        const { tool, def } = await this.resolve(input.tenantId, input.toolId);
+        const comp = this.compensatorOf(tool);
+        if ('holdOnly' in comp) return { ok: true as const, kind: 'hold_only' as const, ref: comp.ref, explanation: comp.explanation };
+        const c = await this.loadConnector(input, tool);
+        const args = this.parseArgs(tool, input.args);
+        const key = tool.idempotency === 'KEYED' && input.runId && input.nodeId ? idempotencyKeyFor(input.runId, input.nodeId) : undefined;
+        await this.deps.buckets.take(`${input.tenantId}:${c.id}`, this.deps.rateLimits?.[def.kind] ?? DEFAULT_BUCKET);
+        const ctx = await this.context(input, c, def, key);
+        const pre = await withRetry(() => comp.capture(args, ctx), 'R0', this.deps.retry ?? DEFAULT_RETRY);
+        const token: CompensationToken = { ref: comp.ref, toolId: tool.toolId, args, pre, forward: null, capturedAt: new Date().toISOString() };
+        return {
+          ok: true as const,
+          kind: 'armed' as const,
+          token,
+          compensator: { ref: comp.ref, toolId: comp.toolId, confidence: comp.confidence, sideEffects: comp.sideEffects, ttlMs: comp.ttlMs },
+          description: comp.describe(token),
+        };
+      } catch (error) {
+        return this.failure(error) as CaptureOutcome;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /** The consequence of undoing, for a token whose forward outcome is now known. */
+  describeCompensation(token: CompensationToken): string | undefined {
+    const found = this.deps.registry.compensator(token.ref);
+    return found && !isHoldOnly(found) ? found.describe(token) : undefined;
+  }
+
+  /**
+   * compensate(): runs a compensator with the connector's credential. Undoing is always
+   * allowed while the connector holds the scopes the forward tool needed — even if an admin has
+   * since disabled that tool: taking an action back is never the thing to block. Transient
+   * failures are retried here; the bounded, durable retry-then-incident loop is the caller's.
+   */
+  async compensate(input: { tenantId: string; connectorId: string; token: CompensationToken; compensationId: string; runId?: string | undefined }): Promise<CompensateOutcome> {
+    return this.tracer.startActiveSpan(`compensate ${input.token.toolId}`, async (span) => {
+      span.setAttributes({ tool_id: input.token.toolId, connector_id: input.connectorId, compensator: input.token.ref, ...(input.runId ? { run_id: input.runId } : {}) });
+      try {
+        const { tool, def } = await this.resolve(input.tenantId, input.token.toolId);
+        const comp = this.compensatorOf(tool);
+        if ('holdOnly' in comp) throw new ToolError('VALIDATION', `${tool.toolId} cannot be undone once released: ${comp.explanation}`, { committed: 'no' });
+        if (comp.ref !== input.token.ref) throw new ToolError('CONFLICT', `token is for ${input.token.ref}, the tool now names ${comp.ref}`, { committed: 'no' });
+        const c = await this.deps.connectors.get(input.tenantId, input.connectorId);
+        if (!c) throw new ToolError('NOT_FOUND', 'connector not found', { committed: 'no' });
+        if (c.kind !== tool.connectorKind) throw new ToolError('VALIDATION', `${tool.toolId} cannot be undone through a ${c.kind} connector`, { committed: 'no' });
+        if (c.status === 'degraded' || c.status === 'expired') throw new ToolError('AUTH_EXPIRED', 'connector needs re-authorization before this can be undone', { committed: 'no' });
+        if (c.status !== 'active') throw new ToolError('CONNECTOR_UNAVAILABLE', `connector is ${c.status}`, { committed: 'no' });
+        const granted = new Set(c.scopesGranted);
+        const missing = tool.scopes.filter((x) => !granted.has(x));
+        if (missing.length) throw new ToolError('PERMISSION_DENIED', `the connector no longer holds scope(s): ${missing.join(', ')}`, { committed: 'no' });
+        await this.deps.buckets.take(`${input.tenantId}:${c.id}`, this.deps.rateLimits?.[def.kind] ?? DEFAULT_BUCKET);
+        const ctx = await this.context({ tenantId: input.tenantId, connectorId: c.id, toolId: tool.toolId, args: {}, runId: input.runId }, c, def, idempotencyKeyFor(`compensation:${input.compensationId}`, input.token.ref));
+        const result = await withRetry(() => comp.compensate(input.token, ctx), 'R1', this.deps.retry ?? DEFAULT_RETRY);
+        await this.deps.connectors.markOk(input.tenantId, c.id);
+        return { ok: true as const, result };
+      } catch (error) {
+        return this.failure(error) as CompensateOutcome;
       } finally {
         span.end();
       }

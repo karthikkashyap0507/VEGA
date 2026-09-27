@@ -5,12 +5,15 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { SourcedSchema } from '@vega/contracts';
 import { BRAND } from '@vega/shared';
 import {
+  DAY_MS,
   DeclarationError,
+  defineCompensator,
   defineRuntimeTool,
   sourced,
   ToolError,
   validateDeclaration,
   type AnyTool,
+  type Compensator,
   type ConnectorDefinition,
   type DynamicToolSource,
   type ToolContext,
@@ -122,6 +125,42 @@ function argsSchemaFrom(inputSchema: Record<string, unknown>): z.ZodType {
   }
 }
 
+/** Where a declared R1/R2 MCP tool's undo lives: a sibling tool on the same server. */
+const MCP_COMPENSATION = Symbol.for('vega.mcp.compensation');
+
+/**
+ * The compensator of a declared R1/R2 MCP tool (docs/module6.md): calls the sibling tool the
+ * administrator named, with the SAME arguments — the convention an admin accepts when declaring
+ * one (add_label/remove_label, share/unshare). Nothing about it can be verified from our side,
+ * so it is APPROXIMATE, assumed to notify third parties, and kept for a short time.
+ */
+function mcpCompensator(tool: AnyTool): Compensator | undefined {
+  const where = (tool as unknown as Record<symbol, { serverUrl: string; name: string } | undefined>)[MCP_COMPENSATION];
+  if (!where || !tool.compensatorRef) return undefined;
+  const host = new URL(where.serverUrl).host;
+  return defineCompensator<Record<string, unknown>, Record<string, never>>({
+    ref: tool.compensatorRef,
+    toolId: tool.toolId,
+    confidence: 'APPROXIMATE',
+    sideEffects: 'NOTIFIES_THIRD_PARTY',
+    ttlMs: 7 * DAY_MS,
+    describe: () => `Calls “${where.name}” on ${host} with the same arguments, as its administrator declared. What that undoes has not been verified.`,
+    async capture() {
+      return {};
+    },
+    async compensate(t, ctx) {
+      const client = await connect(ctx, where.serverUrl);
+      try {
+        const res = (await client.callTool({ name: where.name, arguments: t.args })) as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+        if (res.isError) throw new ToolError('PROVIDER_ERROR', `“${where.name}” reported an error: ${(res.content?.[0]?.text ?? '').slice(0, 200)}`, { committed: 'maybe' });
+        return { outcome: 'restored', summary: `Called “${where.name}” on ${host}.`, notified: [], residual: 'Declared by an administrator; the result was not verified.' };
+      } finally {
+        await client.close().catch(() => undefined);
+      }
+    },
+  });
+}
+
 /** Builds the runtime tool for a stored row: admin declaration if present, conservative defaults otherwise. */
 export function buildTool(row: McpToolRow): AnyTool {
   const d = row.declaredBy === 'admin' ? row.declaration : null;
@@ -189,6 +228,7 @@ export function buildTool(row: McpToolRow): AnyTool {
       }
     },
   };
+  if (compensatorRef && d?.compensatorTool) Object.defineProperty(body, MCP_COMPENSATION, { value: { serverUrl: row.serverUrl, name: d.compensatorTool } });
   return defineRuntimeTool(body as unknown as AnyTool);
 }
 
@@ -231,6 +271,7 @@ export const mcp: ConnectorDefinition = {
     'Run an undeclared tool without approval',
     'Reach loopback or cloud metadata addresses',
   ],
+  dynamicCompensator: (tool) => mcpCompensator(tool),
   async health(ctx) {
     const started = Date.now();
     const tools = await discover(ctx);

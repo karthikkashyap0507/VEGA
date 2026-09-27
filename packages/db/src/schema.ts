@@ -625,6 +625,138 @@ export const policySimulations = pgTable('policy_simulations', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ------------------------------------------------------------------ Module 6 (0009_reversibility)
+
+export const rollbacks = pgTable('rollbacks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  scope: text('scope').notNull(),
+  trigger: text('trigger').notNull(),
+  requestedBy: uuid('requested_by'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  state: text('state').notNull().default('running'),
+  compensationIds: uuid('compensation_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  summaryJson: jsonb('summary_json'),
+});
+
+export const compensations = pgTable('compensations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  actionId: uuid('action_id'),
+  runId: uuid('run_id').notNull(),
+  nodeId: uuid('node_id').notNull(),
+  connectorId: uuid('connector_id').notNull(),
+  toolId: text('tool_id').notNull(),
+  compensatorRef: text('compensator_ref').notNull(),
+  tokenSealed: jsonb('token_sealed').notNull(),
+  tokenDigest: text('token_digest').notNull(),
+  confidence: text('confidence').notNull(),
+  sideEffects: text('side_effects').notNull(),
+  description: text('description').notNull(),
+  ttlMs: bigint('ttl_ms', { mode: 'number' }).notNull(),
+  forwardState: text('forward_state').notNull().default('pending'),
+  commitSeq: bigint('commit_seq', { mode: 'number' }),
+  committedAt: timestamp('committed_at', { withTimezone: true }),
+  ttlAt: timestamp('ttl_at', { withTimezone: true }),
+  state: text('state').notNull().default('armed'),
+  attempts: integer('attempts').notNull().default(0),
+  rollbackId: uuid('rollback_id'),
+  executedAt: timestamp('executed_at', { withTimezone: true }),
+  resultJson: jsonb('result_json'),
+  lastError: jsonb('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const holds = pgTable('holds', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  actionId: uuid('action_id'),
+  runId: uuid('run_id').notNull(),
+  nodeId: uuid('node_id').notNull(),
+  holdKey: text('hold_key').notNull(),
+  toolId: text('tool_id').notNull(),
+  windowMs: integer('window_ms').notNull(),
+  artifactRef: text('artifact_ref').notNull(),
+  artifactSealed: jsonb('artifact_sealed').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  allowedRevokers: uuid('allowed_revokers').array().notNull(),
+  revokeTokenHash: text('revoke_token_hash'),
+  releasedAt: timestamp('released_at', { withTimezone: true }),
+  releasedBy: text('released_by'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokedBy: uuid('revoked_by'),
+  revokeReason: text('revoke_reason'),
+  revokeChannel: text('revoke_channel'),
+  edited: boolean('edited').notNull().default(false),
+  editDiff: jsonb('edit_diff'),
+  editedArgsSealed: jsonb('edited_args_sealed'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }),
+  state: text('state').notNull().default('holding'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const blastRadius = pgTable('blast_radius', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  programVersion: integer('program_version').notNull(),
+  programDigest: text('program_digest').notNull(),
+  effectsJson: jsonb('effects_json').notNull(),
+  summaryJson: jsonb('summary_json').notNull(),
+  minFidelity: text('min_fidelity').notNull(),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const divergences = pgTable('divergences', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  actionId: uuid('action_id'),
+  runId: uuid('run_id').notNull(),
+  nodeId: uuid('node_id').notNull(),
+  toolId: text('tool_id').notNull(),
+  simulatedJson: jsonb('simulated_json').notNull(),
+  actualJson: jsonb('actual_json').notNull(),
+  diffJson: jsonb('diff_json').notNull(),
+  severity: text('severity').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const undoMetrics = pgTable('undo_metrics', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  actionId: uuid('action_id'),
+  runId: uuid('run_id').notNull(),
+  toolId: text('tool_id').notNull(),
+  kind: text('kind').notNull(),
+  channel: text('channel').notNull(),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+  restoredAt: timestamp('restored_at', { withTimezone: true }),
+  durationMs: integer('duration_ms'),
+  succeeded: boolean('succeeded').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const incidents = pgTable('incidents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  kind: text('kind').notNull(),
+  severity: text('severity').notNull(),
+  title: text('title').notNull(),
+  runId: uuid('run_id'),
+  actionId: uuid('action_id'),
+  compensationId: uuid('compensation_id'),
+  detailJson: jsonb('detail_json').notNull().default({}),
+  state: text('state').notNull().default('open'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  acknowledgedBy: uuid('acknowledged_by'),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  resolvedBy: uuid('resolved_by'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolution: text('resolution'),
+});
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -661,6 +793,13 @@ export const TENANT_SCOPED_TABLES = [
   'risk_weights',
   'classifications',
   'policy_simulations',
+  'rollbacks',
+  'compensations',
+  'holds',
+  'blast_radius',
+  'divergences',
+  'undo_metrics',
+  'incidents',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

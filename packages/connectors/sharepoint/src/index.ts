@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SourcedSchema } from '@vega/contracts';
-import { Address, defineTool, externalOnly, sourced, type ConnectorDefinition } from '@vega/connector-sdk';
+import { Address, DAY_MS, defineCompensator, defineTool, externalOnly, forwardDetail, sourced, ToolError, type ConnectorDefinition, type ToolContext } from '@vega/connector-sdk';
 
 /**
  * SharePoint / OneDrive via Microsoft Graph drives — docs/module2.md §5.2 (declared by analogy
@@ -164,12 +164,94 @@ export const share = defineTool({
   },
 });
 
+// ------------------------------------------------------------------ compensators (docs/module6.md §5.4)
+
+interface GraphPermission {
+  id: string;
+  roles?: string[];
+  grantedToV2?: { user?: { email?: string } };
+}
+
+async function permissionFor(ctx: ToolContext, driveId: string, itemId: string, email: string): Promise<GraphPermission | undefined> {
+  const res = await ctx.http.json<{ value?: GraphPermission[] }>(`${item(driveId, itemId)}/permissions`);
+  return (res.value ?? []).find((p) => p.grantedToV2?.user?.email?.toLowerCase() === email.toLowerCase());
+}
+
+/** Undoes `sharepoint.write` with Graph's own restoreVersion. EXACT for the content. */
+export const versionRestore = defineCompensator<{ driveId: string; itemId: string; content: string }, { versionId: string | null; name: string }>({
+  ref: 'sharepoint.version.restore',
+  toolId: 'sharepoint.write',
+  confidence: 'EXACT',
+  sideEffects: 'SILENT',
+  ttlMs: 30 * DAY_MS,
+  describe: (t) => `Puts “${t.pre.name}” back to the version it had before this change (version ${t.pre.versionId ?? '?'}). The changed version stays in its history.`,
+  async capture(args, ctx) {
+    const meta = await ctx.http.json<DriveItem>(item(args.driveId, args.itemId));
+    const versions = await ctx.http.json<{ value?: Array<{ id: string }> }>(`${item(args.driveId, args.itemId)}/versions`);
+    return { versionId: versions.value?.[0]?.id ?? null, name: meta.name ?? args.itemId };
+  },
+  async compensate(t, ctx) {
+    if (!t.pre.versionId) throw new ToolError('NOT_FOUND', 'SharePoint reported no version to restore', { committed: 'no' });
+    const base = item(t.args.driveId, t.args.itemId);
+    const before = await ctx.http.text(`${base}/versions/${encodeURIComponent(t.pre.versionId)}/content`);
+    const now = await ctx.http.text(`${base}/content`);
+    if (now === before) {
+      return t.forward
+        ? { outcome: 'already_restored', summary: `“${t.pre.name}” already has its earlier content.`, notified: [] }
+        : { outcome: 'not_needed', summary: `“${t.pre.name}” was never changed.`, notified: [] };
+    }
+    await ctx.http.json(`${base}/versions/${encodeURIComponent(t.pre.versionId)}/restoreVersion`, { method: 'POST' });
+    return { outcome: 'restored', summary: `Restored “${t.pre.name}” to version ${t.pre.versionId}.`, notified: [], residual: 'The version this action wrote is still in the document’s history.' };
+  },
+});
+
+/** Undoes `sharepoint.share`: removes the access granted, or restores someone's previous role. */
+export const permissionRevoke = defineCompensator<{ driveId: string; itemId: string; email: string; role: string }, { prior: { id: string; role: string } | null }>({
+  ref: 'sharepoint.permission.revoke',
+  toolId: 'sharepoint.share',
+  confidence: 'EXACT',
+  sideEffects: 'SILENT',
+  ttlMs: 90 * DAY_MS,
+  describe: (t) =>
+    t.pre.prior
+      ? `Changes ${t.args.email} back to the ${t.pre.prior.role} access they had before.`
+      : `Removes ${t.args.email}’s access to the document. They were sent an invitation and may already have opened it.`,
+  async capture(args, ctx) {
+    const prior = await permissionFor(ctx, args.driveId, args.itemId, args.email);
+    return { prior: prior ? { id: prior.id, role: prior.roles?.[0] ?? 'read' } : null };
+  },
+  async compensate(t, ctx) {
+    const base = item(t.args.driveId, t.args.itemId);
+    const current = await permissionFor(ctx, t.args.driveId, t.args.itemId, t.args.email);
+    const prior = t.pre.prior;
+    if (prior) {
+      if (!current) throw new ToolError('NOT_FOUND', `${t.args.email} no longer has any access; their earlier ${prior.role} access has to be granted again by hand`, { committed: 'no' });
+      if ((current.roles?.[0] ?? 'read') === prior.role) return { outcome: 'already_restored', summary: `${t.args.email} already has ${prior.role} access again.`, notified: [] };
+      await ctx.http.json(`${base}/permissions/${encodeURIComponent(current.id)}`, { method: 'PATCH', json: { roles: [prior.role] } });
+      return { outcome: 'restored', summary: `${t.args.email} is back to ${prior.role} access.`, notified: [] };
+    }
+    const granted = forwardDetail<{ permissionId: string | null }>(t)?.permissionId ?? current?.id;
+    if (!current || (granted && current.id !== granted)) {
+      return t.forward
+        ? { outcome: 'already_restored', summary: `${t.args.email} already has no access.`, notified: [] }
+        : { outcome: 'not_needed', summary: `${t.args.email} was never given access.`, notified: [] };
+    }
+    try {
+      await ctx.http.json(`${base}/permissions/${encodeURIComponent(current.id)}`, { method: 'DELETE' });
+    } catch (e) {
+      if (!(e instanceof ToolError && e.code === 'NOT_FOUND')) throw e;
+    }
+    return { outcome: 'restored', summary: `Removed ${t.args.email}’s access.`, notified: [], residual: 'They may have opened the document while they had access.' };
+  },
+});
+
 export const sharepoint: ConnectorDefinition = {
   kind: 'sharepoint',
   displayName: 'SharePoint',
   provider: 'microsoft',
   apiBase: 'https://graph.microsoft.com/v1.0',
   tools: [read, write, share],
+  compensators: [versionRestore, permissionRevoke],
   neverDoes: ['Delete documents or sites', 'Create anonymous sharing links', 'Change site permissions'],
   async health(ctx) {
     const started = Date.now();

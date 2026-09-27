@@ -52,7 +52,8 @@ export class FakeCore {
   readonly refreshTokens = new Map<string, { provider: Grant['provider']; account: string; scopes: string[] }>();
   readonly codes = new Map<string, PendingCode>();
   readonly faults: Fault[] = [];
-  readonly calls: Array<{ method: string; url: string }> = [];
+  /** Every request, with the status the fake answered (a refused write changed nothing). */
+  readonly calls: Array<{ method: string; url: string; status?: number }> = [];
   tokenTtlSeconds = 3600;
   now: () => number = Date.now;
 

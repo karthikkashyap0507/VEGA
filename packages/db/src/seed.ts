@@ -207,6 +207,31 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
         [tenantId, bundle.rows[0]!.id, userId],
       );
 
+      // Module 6: one of everything the reversibility layer writes.
+      const sealed = `'{"v":1,"kms":"seed","dek":"","iv":"","tag":"","ct":""}'`;
+      const rb = await client.query<{ id: string }>(
+        `INSERT INTO rollbacks (tenant_id, run_id, scope, trigger, requested_by, state) VALUES ($1, $2, 'run', 'user', $3, 'succeeded') RETURNING id`,
+        [tenantId, run.rows[0]!.id, userId],
+      );
+      await client.query(
+        `INSERT INTO compensations (tenant_id, run_id, node_id, connector_id, tool_id, compensator_ref, token_sealed, token_digest, confidence, side_effects, description, ttl_ms, rollback_id)
+         VALUES ($1, $2, $3, gen_random_uuid(), 'gmail.draft', 'gmail.draft.delete', ${sealed}, 'sha256:seed', 'EXACT', 'SILENT', 'seed', 1000, $4)
+         ON CONFLICT (node_id) DO NOTHING`,
+        [tenantId, run.rows[0]!.id, node.rows[0]!.id, rb.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO holds (tenant_id, run_id, node_id, hold_key, tool_id, window_ms, artifact_ref, artifact_sealed, expires_at, allowed_revokers, state)
+         VALUES ($1, $2, $3, 'seed-' || gen_random_uuid(), 'gmail.send', 1000, 'sealed', ${sealed}, now(), ARRAY[$4::uuid], 'released')`,
+        [tenantId, run.rows[0]!.id, node.rows[0]!.id, userId],
+      );
+      await client.query(`INSERT INTO blast_radius (tenant_id, run_id, program_version, program_digest, effects_json, summary_json, min_fidelity) VALUES ($1, $2, 1, 'sha256:seed', '[]', '{}', 'NONE')`, [tenantId, run.rows[0]!.id]);
+      await client.query(
+        `INSERT INTO divergences (tenant_id, run_id, node_id, tool_id, simulated_json, actual_json, diff_json, severity) VALUES ($1, $2, $3, 'gmail.send', '{}', '{}', '[]', 'WITHIN_TOLERANCE')`,
+        [tenantId, run.rows[0]!.id, node.rows[0]!.id],
+      );
+      await client.query(`INSERT INTO undo_metrics (tenant_id, run_id, tool_id, kind, channel, requested_at, succeeded) VALUES ($1, $2, 'gmail.send', 'revoke', 'app', now(), true)`, [tenantId, run.rows[0]!.id]);
+      await client.query(`INSERT INTO incidents (tenant_id, kind, severity, title, run_id) VALUES ($1, 'compensation_failed', 'HIGH', 'seed', $2)`, [tenantId, run.rows[0]!.id]);
+
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;
       made['workspace' + key] = workspaceId;

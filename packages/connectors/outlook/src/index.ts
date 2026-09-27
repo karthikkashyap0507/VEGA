@@ -1,6 +1,19 @@
 import { z } from 'zod';
 import { SourcedSchema } from '@vega/contracts';
-import { Address, allRecipients, defineTool, externalOnly, htmlToText, sourced, type ConnectorDefinition } from '@vega/connector-sdk';
+import {
+  Address,
+  allRecipients,
+  DAY_MS,
+  defineCompensator,
+  defineHoldOnly,
+  defineTool,
+  externalOnly,
+  forwardDetail,
+  htmlToText,
+  sourced,
+  ToolError,
+  type ConnectorDefinition,
+} from '@vega/connector-sdk';
 
 /**
  * Outlook / Exchange via Microsoft Graph — docs/module2.md §5.2 (declared by analogy with Gmail).
@@ -301,12 +314,81 @@ export const eventCreate = defineTool({
   },
 });
 
+// ------------------------------------------------------------------ compensators (docs/module6.md §5.4)
+
+const missing = (e: unknown) => e instanceof ToolError && e.code === 'NOT_FOUND';
+
+/** Undoes `outlook.draft`: deletes the draft. EXACT and SILENT — it was never sent. */
+export const draftDelete = defineCompensator<z.infer<typeof Outgoing>, Record<string, never>>({
+  ref: 'outlook.draft.delete',
+  toolId: 'outlook.draft',
+  confidence: 'EXACT',
+  sideEffects: 'SILENT',
+  ttlMs: 30 * DAY_MS,
+  describe: (t) => `Deletes the draft “${t.args.subject}”. It was never sent, so nobody else is affected.`,
+  async capture() {
+    return {};
+  },
+  async compensate(t, ctx) {
+    const id = forwardDetail<{ draftId: string | null }>(t)?.draftId ?? t.forward?.providerRef;
+    // Graph gives a draft no key we chose, so an unknown outcome cannot be looked up: say so.
+    if (!id) throw new ToolError('NOT_FOUND', 'the draft’s id is unknown (the call’s outcome was never recorded); check Drafts in Outlook', { committed: 'no' });
+    try {
+      await ctx.http.json(`/me/messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch (e) {
+      if (missing(e)) return { outcome: 'already_restored', summary: `The draft “${t.args.subject}” was already deleted.`, notified: [] };
+      throw e;
+    }
+    return { outcome: 'restored', summary: `Deleted the draft “${t.args.subject}”.`, notified: [] };
+  },
+});
+
+export const sendRecall = defineHoldOnly({
+  ref: 'outlook.send.recall',
+  toolId: 'outlook.send',
+  explanation: 'An email cannot be unsent. It can only be stopped while it is held, before it is released.',
+});
+
+/** Undoes `outlook.event_create`: cancels the meeting, which sends attendees a cancellation. */
+export const eventDelete = defineCompensator<{ subject: string; attendees: string[] }, Record<string, never>>({
+  ref: 'outlook.event.delete',
+  toolId: 'outlook.event_create',
+  confidence: 'APPROXIMATE',
+  sideEffects: 'NOTIFIES_THIRD_PARTY',
+  ttlMs: 90 * DAY_MS,
+  describe: (t) =>
+    t.args.attendees.length
+      ? `Cancels “${t.args.subject}” and sends a cancellation to ${t.args.attendees.length} attendee${t.args.attendees.length === 1 ? '' : 's'}. They will see that it was cancelled.`
+      : `Deletes “${t.args.subject}” from the calendar. Nobody else was invited.`,
+  async capture() {
+    return {};
+  },
+  async compensate(t, ctx) {
+    const id = forwardDetail<{ eventId: string | null }>(t)?.eventId ?? t.forward?.providerRef;
+    if (!id) throw new ToolError('NOT_FOUND', 'the event’s id is unknown (the call’s outcome was never recorded); check the calendar in Outlook', { committed: 'no' });
+    try {
+      await ctx.http.json(`/me/events/${encodeURIComponent(id)}/cancel`, { method: 'POST', json: { comment: 'This meeting was cancelled.' } });
+    } catch (e) {
+      if (missing(e)) return { outcome: 'already_restored', summary: `“${t.args.subject}” was already cancelled.`, notified: [] };
+      throw e;
+    }
+    const notified = t.args.attendees.map((a) => a.toLowerCase());
+    return {
+      outcome: 'restored',
+      summary: `Cancelled “${t.args.subject}”${notified.length ? ` and notified ${notified.length} attendee${notified.length === 1 ? '' : 's'}` : ''}.`,
+      notified,
+      ...(notified.length ? { residual: 'Attendees saw the invitation, and now see that it was cancelled.' } : {}),
+    };
+  },
+});
+
 export const outlook: ConnectorDefinition = {
   kind: 'outlook',
   displayName: 'Outlook',
   provider: 'microsoft',
   apiBase: 'https://graph.microsoft.com/v1.0',
   tools: [search, read, draft, send, eventCreate],
+  compensators: [draftDelete, sendRecall, eventDelete],
   neverDoes: ['Delete messages', 'Change mailbox rules or forwarding', 'Access other people’s mailboxes'],
   async health(ctx) {
     const started = Date.now();

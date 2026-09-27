@@ -44,7 +44,7 @@ export class FakeSlack {
       if (g instanceof Response) return g;
       const body = (await req.json()) as { channel: string; ts: string };
       const p = this.posts.find((x) => x.channel === body.channel && x.ts === body.ts);
-      if (!p) return json(200, { ok: false, error: 'message_not_found' });
+      if (!p || p.deleted) return json(200, { ok: false, error: 'message_not_found' });
       p.deleted = true;
       return json(200, { ok: true });
     }

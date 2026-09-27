@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SourcedSchema } from '@vega/contracts';
-import { defineTool, sourced, ToolError, type ConnectorDefinition, type ToolContext } from '@vega/connector-sdk';
+import { DAY_MS, defineCompensator, defineTool, forwardDetail, sourced, ToolError, type ConnectorDefinition, type ToolContext } from '@vega/connector-sdk';
 
 /**
  * Slack — docs/module2.md §5.2.
@@ -120,12 +120,45 @@ export const post = defineTool({
   },
 });
 
+// ------------------------------------------------------------------ compensator (docs/module6.md §5.4)
+
+/**
+ * Undoes a released `slack.post` by deleting the message. APPROXIMATE: people may already have
+ * read it, and members can see that a message was removed.
+ */
+export const messageDelete = defineCompensator<{ channel: string; text: string }, Record<string, never>>({
+  ref: 'slack.message.delete',
+  toolId: 'slack.post',
+  confidence: 'APPROXIMATE',
+  sideEffects: 'NOTIFIES_THIRD_PARTY',
+  ttlMs: 7 * DAY_MS,
+  describe: (t) => `Deletes the message from ${t.args.channel}. Anyone who already read it has seen it, and members can see that a message was removed.`,
+  async capture() {
+    return {};
+  },
+  async compensate(t, ctx) {
+    const d = forwardDetail<{ channel: string; ts: string | null }>(t);
+    const [refChannel, refTs] = (t.forward?.providerRef ?? '').split(':');
+    const channel = d?.channel ?? refChannel;
+    const ts = d?.ts ?? refTs;
+    if (!channel || !ts) throw new ToolError('NOT_FOUND', 'the message’s timestamp is unknown (the call’s outcome was never recorded); check the channel in Slack', { committed: 'no' });
+    try {
+      await slack(ctx, 'chat.delete', { channel, ts });
+    } catch (e) {
+      if (e instanceof ToolError && e.code === 'NOT_FOUND') return { outcome: 'already_restored', summary: `The message in ${t.args.channel} was already deleted.`, notified: [] };
+      throw e;
+    }
+    return { outcome: 'restored', summary: `Deleted the message from ${t.args.channel}.`, notified: [], residual: 'Anyone who already read it has seen it.' };
+  },
+});
+
 export const slackConnector: ConnectorDefinition = {
   kind: 'slack',
   displayName: 'Slack',
   provider: 'slack',
   apiBase: 'https://slack.com/api',
   tools: [channels, post],
+  compensators: [messageDelete],
   neverDoes: ['Read private channels or direct messages', 'Invite or remove members', 'Change workspace settings'],
   async health(ctx) {
     const started = Date.now();

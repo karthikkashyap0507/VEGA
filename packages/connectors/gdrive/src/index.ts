@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { SourcedSchema } from '@vega/contracts';
-import { Address, defineTool, externalOnly, sourced, type ConnectorDefinition } from '@vega/connector-sdk';
+import { Address, DAY_MS, defineCompensator, defineTool, externalOnly, sourced, ToolError, type ConnectorDefinition, type ToolContext } from '@vega/connector-sdk';
 
 /**
  * Google Drive — docs/module2.md §5.2.
@@ -213,12 +213,97 @@ export const share = defineTool({
   },
 });
 
+// ------------------------------------------------------------------ compensators (docs/module6.md §5.4)
+
+async function permissionFor(ctx: ToolContext, fileId: string, email: string): Promise<DPermission | undefined> {
+  const perms = await ctx.http.json<{ permissions?: DPermission[] }>(`${FILES}/${encodeURIComponent(fileId)}/permissions`, {
+    query: { fields: 'permissions(id,type,role,emailAddress)' },
+  });
+  return (perms.permissions ?? []).find((p) => p.emailAddress?.toLowerCase() === email.toLowerCase());
+}
+
+/**
+ * Undoes `gdrive.write` by writing the previous revision's content back. EXACT for the content;
+ * the version this action wrote stays in the file's history (Drive keeps revisions ~30 days).
+ */
+export const revisionRestore = defineCompensator<{ fileId: string; content: string; mimeType: string }, { revisionId: string | null; name: string; mimeType: string }>({
+  ref: 'gdrive.revision.restore',
+  toolId: 'gdrive.write',
+  confidence: 'EXACT',
+  sideEffects: 'SILENT',
+  ttlMs: 30 * DAY_MS,
+  describe: (t) => `Puts “${t.pre.name}” back to the version it had before this change. The changed version stays in the file’s history.`,
+  async capture(args, ctx) {
+    const meta = await ctx.http.json<DFile>(`${FILES}/${encodeURIComponent(args.fileId)}`, { query: { fields: 'id,name,mimeType,headRevisionId' } });
+    return { revisionId: meta.headRevisionId ?? null, name: meta.name ?? args.fileId, mimeType: meta.mimeType ?? args.mimeType };
+  },
+  async compensate(t, ctx) {
+    if (!t.pre.revisionId) throw new ToolError('NOT_FOUND', 'Drive reported no revision to restore', { committed: 'no' });
+    const file = encodeURIComponent(t.args.fileId);
+    const before = await ctx.http.text(`${FILES}/${file}/revisions/${encodeURIComponent(t.pre.revisionId)}`, { query: { alt: 'media' } });
+    const now = await ctx.http.text(`${FILES}/${file}`, { query: { alt: 'media' } });
+    if (now === before) {
+      return t.forward
+        ? { outcome: 'already_restored', summary: `“${t.pre.name}” already has its earlier content.`, notified: [] }
+        : { outcome: 'not_needed', summary: `“${t.pre.name}” was never changed.`, notified: [] };
+    }
+    await ctx.http.json(`/upload${FILES}/${file}`, { method: 'PATCH', query: { uploadType: 'media', fields: 'id,headRevisionId' }, body: before, contentType: t.pre.mimeType });
+    return { outcome: 'restored', summary: `Restored “${t.pre.name}” to its earlier version.`, notified: [], residual: 'The version this action wrote is still in the file’s history.' };
+  },
+});
+
+/**
+ * Undoes `gdrive.share`: removes the access it granted — or, for someone who already had
+ * access, puts back THEIR previous role (never revokes access they had before).
+ */
+export const permissionRevoke = defineCompensator<{ fileId: string; email: string; role: string }, { prior: { id: string; role: string } | null }>({
+  ref: 'gdrive.permission.revoke',
+  toolId: 'gdrive.share',
+  confidence: 'EXACT',
+  sideEffects: 'SILENT',
+  ttlMs: 90 * DAY_MS,
+  describe: (t) =>
+    t.pre.prior
+      ? `Changes ${t.args.email} back to the ${t.pre.prior.role} access they had before.`
+      : `Removes ${t.args.email}’s access to the file. They were emailed a link when it was shared and may already have opened it.`,
+  async capture(args, ctx) {
+    const prior = await permissionFor(ctx, args.fileId, args.email);
+    return { prior: prior ? { id: prior.id, role: prior.role } : null };
+  },
+  async compensate(t, ctx) {
+    const file = encodeURIComponent(t.args.fileId);
+    const current = await permissionFor(ctx, t.args.fileId, t.args.email);
+    const prior = t.pre.prior;
+    if (prior) {
+      if (current?.role === prior.role) return { outcome: 'already_restored', summary: `${t.args.email} already has ${prior.role} access again.`, notified: [] };
+      if (current) {
+        await ctx.http.json(`${FILES}/${file}/permissions/${encodeURIComponent(current.id)}`, { method: 'PATCH', json: { role: prior.role } });
+      } else {
+        await ctx.http.json(`${FILES}/${file}/permissions`, { method: 'POST', query: { sendNotificationEmail: false }, json: { type: 'user', role: prior.role, emailAddress: t.args.email } });
+      }
+      return { outcome: 'restored', summary: `${t.args.email} is back to ${prior.role} access.`, notified: [] };
+    }
+    if (!current) {
+      return t.forward
+        ? { outcome: 'already_restored', summary: `${t.args.email} already has no access.`, notified: [] }
+        : { outcome: 'not_needed', summary: `${t.args.email} was never given access.`, notified: [] };
+    }
+    try {
+      await ctx.http.json(`${FILES}/${file}/permissions/${encodeURIComponent(current.id)}`, { method: 'DELETE' });
+    } catch (e) {
+      if (!(e instanceof ToolError && e.code === 'NOT_FOUND')) throw e;
+    }
+    return { outcome: 'restored', summary: `Removed ${t.args.email}’s access.`, notified: [], residual: 'They may have opened the file while they had access.' };
+  },
+});
+
 export const gdrive: ConnectorDefinition = {
   kind: 'gdrive',
   displayName: 'Google Drive',
   provider: 'google',
   apiBase: 'https://www.googleapis.com',
   tools: [read, write, share],
+  compensators: [revisionRestore, permissionRevoke],
   neverDoes: ['Delete files permanently', 'Make files public to anyone with the link', 'Transfer file ownership'],
   async health(ctx) {
     const started = Date.now();

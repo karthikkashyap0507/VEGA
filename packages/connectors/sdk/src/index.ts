@@ -1,3 +1,4 @@
+export * from './compensator.js';
 export * from './connector.js';
 export * from './consent.js';
 export * from './define.js';

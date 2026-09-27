@@ -26,16 +26,26 @@ export interface FakeMessage {
   internalDate: number;
 }
 
-export interface FakeEvent {
+export interface FakeEventFields {
   id: string;
   summary?: string;
   description?: string;
   location?: string;
   start: { dateTime: string };
   end: { dateTime: string };
-  attendees?: Array<{ email: string }>;
+  attendees?: Array<{ email: string; responseStatus?: string }>;
   organizer?: { email: string };
   status: string;
+}
+/** An event, plus anything else Google keeps on one (recurrence, reminders, conferenceData…). */
+export type FakeEvent = FakeEventFields & { [field: string]: unknown };
+
+/** An email Google sent on the account's behalf about an event or a shared file. */
+export interface FakeNotification {
+  account: string;
+  kind: 'invitation' | 'update' | 'cancellation' | 'share';
+  resourceId: string;
+  to: string[];
 }
 
 export interface FakeFile {
@@ -74,6 +84,8 @@ export class FakeGoogle {
   readonly files = new Map<string, FakeFile>();
   /** Every message actually sent, in order — what "exactly one effect" is asserted against. */
   readonly sent: FakeMessage[] = [];
+  /** Invitations, updates, cancellations and share emails Google sent to other people. */
+  readonly notifications: FakeNotification[] = [];
 
   constructor(readonly core: FakeCore) {}
 
@@ -103,7 +115,7 @@ export class FakeGoogle {
     return msg;
   }
 
-  seedEvent(account: string, e: Omit<FakeEvent, 'id' | 'status'> & { id?: string }): FakeEvent {
+  seedEvent(account: string, e: Omit<FakeEventFields, 'id' | 'status'> & { id?: string; [field: string]: unknown }): FakeEvent {
     const ev: FakeEvent = { ...e, id: e.id ?? this.core.id('e'), status: 'confirmed' };
     this.calendar(account).set(ev.id, ev);
     return ev;
@@ -124,6 +136,19 @@ export class FakeGoogle {
 
   events(account: string): FakeEvent[] {
     return [...this.calendar(account).values()];
+  }
+
+  drafts(account: string): Array<{ id: string; message: FakeMessage }> {
+    const box = this.mailbox(account);
+    return [...box.drafts.values()].map((d) => ({ id: d.id, message: box.messages.get(d.messageId)! }));
+  }
+
+  /** `sendUpdates=all|externalOnly`: Google emails the attendees (never the organizer). */
+  private notify(account: string, url: URL, kind: FakeNotification['kind'], ev: FakeEvent): void {
+    const mode = url.searchParams.get('sendUpdates');
+    if (mode !== 'all' && mode !== 'externalOnly') return;
+    const to = (ev.attendees ?? []).map((a) => a.email.toLowerCase()).filter((e) => e !== account.toLowerCase());
+    if (to.length) this.notifications.push({ account, kind, resourceId: ev.id, to });
   }
 
   async handle(req: Request, url: URL): Promise<Response | undefined> {
@@ -214,6 +239,13 @@ export class FakeGoogle {
       this.mailbox(g.account).drafts.set(draftId, { id: draftId, messageId: msg.id });
       return json(200, { id: draftId, message: { id: msg.id, threadId: msg.threadId, labelIds: ['DRAFT'] } });
     }
+    if (path === '/drafts' && method === 'GET') {
+      const g = needs([G.gmailCompose, G.gmailModify, G.gmailRead]);
+      if (g instanceof Response) return g;
+      const q = (url.searchParams.get('q') ?? '').toLowerCase();
+      const found = this.drafts(g.account).filter((d) => this.matches(d.message, q));
+      return json(200, { drafts: found.map((d) => ({ id: d.id, message: { id: d.message.id, threadId: d.message.threadId } })), resultSizeEstimate: found.length });
+    }
     const draft = path.match(/^\/drafts\/([^/]+)$/);
     if (draft && (method === 'GET' || method === 'DELETE')) {
       const g = needs([G.gmailCompose, G.gmailModify]);
@@ -291,11 +323,12 @@ export class FakeGoogle {
     if (path === base && method === 'POST') {
       const g = this.core.authenticate(req, 'google', [G.calWrite]);
       if (g instanceof Response) return g;
-      const body = (await req.json()) as Omit<FakeEvent, 'status'> & { id?: string };
+      const body = (await req.json()) as Omit<FakeEventFields, 'id' | 'status'> & { id?: string; [field: string]: unknown };
       const cal = this.calendar(g.account);
       if (body.id && cal.has(body.id)) return json(409, { error: { code: 409, message: 'The requested identifier already exists.' } });
       const ev: FakeEvent = { ...body, id: body.id ?? this.core.id('e'), organizer: { email: g.account }, status: 'confirmed' };
       cal.set(ev.id, ev);
+      this.notify(g.account, url, 'invitation', ev);
       return json(200, ev);
     }
     const one = path.match(/^\/calendars\/primary\/events\/([^/]+)$/);
@@ -311,10 +344,20 @@ export class FakeGoogle {
       if (method === 'PATCH') {
         const patch = (await req.json()) as Partial<FakeEvent>;
         Object.assign(ev, patch);
+        this.notify(g.account, url, 'update', ev);
+        return json(200, ev);
+      }
+      if (method === 'PUT') {
+        // events.update: the body REPLACES the event (fields it omits are cleared).
+        const body = (await req.json()) as Partial<FakeEvent>;
+        for (const k of Object.keys(ev)) if (k !== 'id' && k !== 'organizer') delete ev[k];
+        Object.assign(ev, body, { id: ev.id, organizer: ev.organizer, status: 'confirmed' });
+        this.notify(g.account, url, 'update', ev);
         return json(200, ev);
       }
       if (method === 'DELETE') {
         ev.status = 'cancelled';
+        this.notify(g.account, url, 'cancellation', ev);
         return new Response(null, { status: 204 });
       }
     }
@@ -347,12 +390,36 @@ export class FakeGoogle {
         }
         const p = { id: this.core.id('p'), ...body };
         f.permissions.push(p);
+        if (url.searchParams.get('sendNotificationEmail') !== 'false' && body.emailAddress) {
+          this.notifications.push({ account: g.account, kind: 'share', resourceId: f.id, to: [body.emailAddress.toLowerCase()] });
+        }
+        return json(200, p);
+      }
+      if (method === 'PATCH' && perms[2]) {
+        const p = f.permissions.find((x) => x.id === decodeURIComponent(perms[2]!));
+        if (!p) return json(404, { error: { code: 404, message: 'Permission not found' } });
+        const body = (await req.json()) as { role?: string };
+        if (body.role) p.role = body.role;
         return json(200, p);
       }
       if (method === 'DELETE' && perms[2]) {
+        const before = f.permissions.length;
         f.permissions = f.permissions.filter((p) => p.id !== decodeURIComponent(perms[2]!));
+        if (f.permissions.length === before) return json(404, { error: { code: 404, message: 'Permission not found' } });
         return new Response(null, { status: 204 });
       }
+    }
+    const revs = path.match(/^\/files\/([^/]+)\/revisions(?:\/([^/]+))?$/);
+    if (revs && method === 'GET') {
+      const g = this.core.authenticate(req, 'google', read);
+      if (g instanceof Response) return g;
+      const f = this.files.get(decodeURIComponent(revs[1]!));
+      if (!f) return json(404, { error: { code: 404, message: 'File not found' } });
+      if (!revs[2]) return json(200, { revisions: f.revisions.map((r) => ({ id: r.id, size: String(Buffer.byteLength(r.content)) })) });
+      const r = f.revisions.find((x) => x.id === decodeURIComponent(revs[2]!));
+      if (!r) return json(404, { error: { code: 404, message: 'Revision not found' } });
+      if (url.searchParams.get('alt') === 'media') return new Response(r.content, { status: 200, headers: { 'content-type': f.mimeType } });
+      return json(200, { id: r.id, size: String(Buffer.byteLength(r.content)) });
     }
     const exp = path.match(/^\/files\/([^/]+)\/export$/);
     if (exp && method === 'GET') {

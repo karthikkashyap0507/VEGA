@@ -8,6 +8,7 @@ import type {
   SimulationFidelity,
   TaintLevel,
 } from '@vega/contracts';
+import type { AnyCompensator } from './compensator.js';
 import type { ProviderHttp } from './http.js';
 
 /**
@@ -91,4 +92,12 @@ export interface ConnectorDefinition {
    * Generated alongside the permissions so the two cannot drift.
    */
   neverDoes: string[];
+  /**
+   * The inverses of this connector's R1/R2 tools (docs/module6.md §5.4), one per
+   * `compensatorRef`. The registry refuses a connector whose R1/R2 tool names a compensator it
+   * does not ship — the build-time half of "every R1/R2 action has a tested compensator".
+   */
+  compensators?: AnyCompensator[];
+  /** For tools discovered at runtime (MCP): the compensator a declared R1/R2 tool names. */
+  dynamicCompensator?(tool: AnyTool): AnyCompensator | undefined;
 }
