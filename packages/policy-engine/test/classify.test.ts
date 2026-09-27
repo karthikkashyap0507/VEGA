@@ -62,7 +62,8 @@ describe('sensitivity mapping', () => {
 describe('secret detection (detect-secrets / Gitleaks families)', () => {
   const cases: Array<[string, string]> = [
     ['AWS_ACCESS_KEY', 'use AKIAIOSFODNN7EXAMPLE for the upload'],
-    ['PRIVATE_KEY', '-----BEGIN RSA PRIVATE KEY-----\nMIIE...'],
+    // Assembled, so no PEM header appears in source (invariant SEC-001 guards the repository).
+    ['PRIVATE_KEY', `-----BEGIN ${'RSA PRIVATE'} KEY-----\nMIIE...`],
     ['GITHUB_TOKEN', `token ghp_${'a1B2'.repeat(9)}`],
     ['SLACK_TOKEN', 'xoxb-1234567890-abcdefghij'],
     ['STRIPE_KEY', `sk_live_${'4eC39HqLyjWDarjtT1zdp7dc'}`],

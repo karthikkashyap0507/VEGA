@@ -2,10 +2,12 @@
 import { Check, PenLine, X } from 'lucide-react';
 import { useState } from 'react';
 import { ReversibilityBadge, type Reversibility } from '@/components/connectors/reversibility-badge';
+import { ReasonChain, RiskExplanation } from '@/components/policy/risk-explanation';
 import { ProvenanceChip } from '@/components/provenance/taint';
 import { Button } from '@/components/ui/button';
 import { RiskBadge, type RiskTier } from '@/components/ui/risk-badge';
 import { cn } from '@/lib/utils';
+import { durationText, useEvaluations } from '@/lib/policy';
 import type { PendingAction, Taint } from '@/lib/runs';
 
 /**
@@ -13,9 +15,10 @@ import type { PendingAction, Taint } from '@/lib/runs';
  * it will do, how risky, how reversible, where every argument came from, and the decision.
  *
  * Designed against Module 8's decision packet and Module 6's blast radius, which reuse it:
- * `effect` is the simulated blast radius, `policy` carries M5's risk tier once it exists, and
- * the controls are approve / modify / reject — modify is shown and disabled until M8 wires it
- * (a control the system cannot yet honour is not offered as if it could).
+ * `effect` is the simulated blast radius, `policy` carries M5's decision (with its risk
+ * explanation panel, §6.3), and the controls are approve / modify / reject — modify is shown
+ * and disabled until M8 wires it (a control the system cannot yet honour is not offered as if
+ * it could).
  */
 
 function valueText(v: unknown): string {
@@ -35,9 +38,35 @@ export interface ActionCardProps {
   onDecide?: ((decision: 'approve' | 'reject', note?: string) => Promise<unknown>) | undefined;
   busy?: boolean;
   className?: string;
+  /** The run, so the card can show the policy engine's evaluation of this step. */
+  runId?: string | undefined;
 }
 
-export function ActionCard({ action, onDecide, busy, className }: ActionCardProps) {
+/** Who must approve, how many, and progress so far — the policy's own words (module5.md §5.1). */
+function ApprovalRequirement({ action }: { action: PendingAction }) {
+  const p = action.policy;
+  if (!p || (p.decision !== 'REQUIRE_APPROVAL' && p.decision !== 'REQUIRE_DUAL_APPROVAL')) return null;
+  const n = action.approvalsRequired ?? 1;
+  const done = action.approvedBy?.length ?? 0;
+  return (
+    <p className="text-xs" data-testid="approval-requirement">
+      Needs {n === 2 ? 'two approvals' : 'approval'}
+      {p.approverRole ? ` by ${p.approverRole}` : ''}
+      {p.separationOfDuties ? ' — not by the person this run acts for' : ''}
+      {n > 1 ? ` · ${done} of ${n} so far` : ''}
+      {p.holdWindowMs ? ` · then a ${durationText(p.holdWindowMs)} hold window` : ''}
+    </p>
+  );
+}
+
+function PolicyPanel({ runId, action }: { runId: string; action: PendingAction }) {
+  const q = useEvaluations(runId);
+  const ev = q.data?.find((e) => e.id === action.policy?.evaluationId);
+  if (ev) return <RiskExplanation evaluation={ev} />;
+  return action.policy?.chain?.length ? <ReasonChain chain={action.policy.chain} /> : null;
+}
+
+export function ActionCard({ action, onDecide, busy, className, runId }: ActionCardProps) {
   const [note, setNote] = useState('');
   const tier = (action.policy?.riskTier as RiskTier | undefined) ?? undefined;
   const leaves = action.argTaints ?? [];
@@ -47,7 +76,7 @@ export function ActionCard({ action, onDecide, busy, className }: ActionCardProp
       <header className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-semibold">{action.toolId}</code>
         {action.reversibility ? <ReversibilityBadge value={action.reversibility as Reversibility} /> : null}
-        {tier ? <RiskBadge tier={tier} /> : <span className="text-xs text-muted" title="Risk scoring arrives with the policy engine (Module 5)">risk: not yet scored</span>}
+        {tier ? <RiskBadge tier={tier} /> : <span className="text-xs text-muted">risk: not scored</span>}
         {action.argTaint ? <ProvenanceChip taint={action.argTaint} sourceIds={[...new Set(leaves.flatMap((l) => l.sourceIds))]} label={`arguments: ${action.argTaint.toLowerCase()}`} /> : null}
       </header>
       {action.effect ? (
@@ -57,6 +86,8 @@ export function ActionCard({ action, onDecide, busy, className }: ActionCardProp
         </p>
       ) : null}
       {action.reason ? <p className="text-xs text-muted">Why it waits: {action.reason}</p> : null}
+      <ApprovalRequirement action={action} />
+      {runId && action.policy ? <PolicyPanel runId={runId} action={action} /> : null}
       {action.assumptions?.length ? (
         <ul className="rounded border border-border bg-surface-muted p-2 text-xs">
           {action.assumptions.map((a) => (

@@ -11,6 +11,8 @@ const SECTIONS = [
   { href: '/admin/connectors', label: 'Connectors' },
   { href: '/admin/sessions', label: 'Sessions' },
   { href: '/admin/security', label: 'Security' },
+  { href: '/admin/policies', label: 'Policies' },
+  { href: '/admin/risk', label: 'Risk' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -19,7 +21,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="mx-auto grid max-w-5xl gap-4">
       <header className="grid gap-1">
         <h1 className="text-lg font-semibold">Admin & policy console</h1>
-        <p className="text-sm text-muted">People, workspaces, agents, connectors and sessions. Policy authoring arrives with Module 5.</p>
+        <p className="text-sm text-muted">People, workspaces, agents, connectors, sessions — and the policies and risk weights that decide every action.</p>
       </header>
       <nav aria-label="Admin sections" className="flex gap-1 overflow-x-auto border-b border-border">
         {SECTIONS.map((s) => {

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { runActions, runKeys, TERMINAL, useRun, useRunStream, type PendingAction } from '@/lib/runs';
 import { ActionCard } from './action-card';
 import { ClarificationPrompt } from './clarification-prompt';
+import { HoldCard } from './hold-card';
 import { StreamingStatus } from './status';
 
 function show(v: unknown): string {
@@ -61,7 +62,10 @@ export function RunCard({ runId }: { runId: string }) {
         </p>
       ) : null}
       {run.status === 'AWAITING_APPROVAL' && pending?.kind === 'approval' ? (
-        <ActionCard action={pending} busy={busy} onDecide={(d, note) => act(() => runActions.decide(run.id, d, note))()} />
+        <ActionCard action={pending} runId={run.id} busy={busy} onDecide={(d, note) => act(() => runActions.decide(run.id, d, note))()} />
+      ) : null}
+      {run.status === 'HELD' && pending?.kind === 'hold' ? (
+        <HoldCard action={pending} runId={run.id} busy={busy} onRelease={act(() => runActions.release(run.id))} onRevoke={act(() => runActions.revoke(run.id))} />
       ) : null}
       {run.status === 'AWAITING_INPUT' && pending?.kind === 'clarification' && pending.ambiguity ? (
         <ClarificationPrompt ambiguity={pending.ambiguity} reason={pending.reason} busy={busy} onAnswer={(field, choice) => act(() => runActions.input(run.id, field, choice))()} />
@@ -78,7 +82,7 @@ export function RunCard({ runId }: { runId: string }) {
           </Button>
         </div>
       ) : null}
-      {run.statusReason && ['FAILED', 'PLAN_REJECTED', 'CANCELLED', 'NEEDS_ATTENTION', 'HELD'].includes(run.status) ? <p className="text-sm text-risk-critical">{run.statusReason}</p> : null}
+      {run.statusReason && (['FAILED', 'PLAN_REJECTED', 'CANCELLED', 'NEEDS_ATTENTION'].includes(run.status) || (run.status === 'HELD' && pending?.kind !== 'hold')) ? <p className="text-sm text-risk-critical">{run.statusReason}</p> : null}
       {emits.length ? (
         <div className="grid gap-1" data-testid="run-result">
           {emits.map((e, i) => (

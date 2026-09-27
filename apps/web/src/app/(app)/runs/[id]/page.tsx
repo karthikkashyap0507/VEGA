@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import { ErrorText } from '@/components/error-text';
 import { ProvenanceGraph, type GraphNode } from '@/components/provenance/provenance-graph';
 import { ProvenanceChip } from '@/components/provenance/taint';
+import { RiskExplanation } from '@/components/policy/risk-explanation';
 import { ActionCard } from '@/components/runs/action-card';
 import { ProgramViewer } from '@/components/runs/program-viewer';
 import { RunTimeline } from '@/components/runs/run-timeline';
@@ -12,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, Td, Th } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { api } from '@/lib/api';
+import { useEvaluations } from '@/lib/policy';
 import { TERMINAL, useRun, useRunStream, type PendingAction } from '@/lib/runs';
 
 /**
@@ -24,6 +26,7 @@ export default function RunInspectorPage() {
   const q = useRun(id);
   const run = q.data?.run;
   const stream = useRunStream(id, Boolean(run && !TERMINAL.has(run.status)));
+  const evaluations = useEvaluations(run ? id : undefined);
   const graph = useQuery({ queryKey: ['runs', id, 'provenance'], queryFn: () => api.get<{ nodes: GraphNode[]; edges: Array<{ from: string; to: string }> }>(`/v1/runs/${id}/provenance`), enabled: Boolean(run) });
   if (q.error) return <ErrorText error={q.error} />;
   if (!q.data || !run) return <p className="text-sm text-muted">Loading run…</p>;
@@ -73,7 +76,7 @@ export default function RunInspectorPage() {
           </CardContent>
         </Card>
       </div>
-      {pending?.kind === 'approval' ? <ActionCard action={pending} /> : null}
+      {pending?.kind === 'approval' || pending?.kind === 'hold' ? <ActionCard action={pending} runId={run.id} /> : null}
       <Tabs defaultValue="timeline" className="grid gap-3">
         <TabsList>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
@@ -81,7 +84,25 @@ export default function RunInspectorPage() {
           <TabsTrigger value="provenance">Provenance</TabsTrigger>
           <TabsTrigger value="replans">Replans ({d.replans.length})</TabsTrigger>
           <TabsTrigger value="actions">Actions ({d.actions.length})</TabsTrigger>
+          <TabsTrigger value="policy">Policy ({evaluations.data?.length ?? 0})</TabsTrigger>
         </TabsList>
+        <TabsContent value="policy">
+          <div className="grid gap-2" data-testid="run-evaluations">
+            {evaluations.data?.length ? (
+              evaluations.data.map((e) => (
+                <div key={e.id} className="grid gap-1">
+                  <p className="text-xs text-muted">
+                    <code className="font-semibold text-foreground">{e.toolId}</code> · {new Date(e.evaluatedAt).toLocaleTimeString()}
+                    {e.latencyMs !== null ? ` · decided in ${e.latencyMs} ms` : ''}
+                  </p>
+                  <RiskExplanation evaluation={e} />
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted">No policy evaluations yet: every step is decided before it runs.</p>
+            )}
+          </div>
+        </TabsContent>
         <TabsContent value="timeline">
           <RunTimeline nodes={d.nodes} highlightVersion={run.programVersion} />
         </TabsContent>

@@ -106,6 +106,26 @@ export function registerRunRoutes(app: FastifyInstance, hooks: RouteHooks, deps:
 
   defineRoute(app, hooks, {
     method: 'POST',
+    url: '/v1/runs/:id/release',
+    summary: 'A held action (policy hold window): run it now',
+    tags: ['runs'],
+    params: Id,
+    successStatus: 200,
+    handler: ({ control, params }) => control.runs.release.mutate(params),
+  });
+
+  defineRoute(app, hooks, {
+    method: 'POST',
+    url: '/v1/runs/:id/revoke',
+    summary: 'A held action: cancel it inside its window — it never happens',
+    tags: ['runs'],
+    params: Id,
+    successStatus: 200,
+    handler: ({ control, params }) => control.runs.revoke.mutate(params),
+  });
+
+  defineRoute(app, hooks, {
+    method: 'POST',
     url: '/v1/runs/:id/resume',
     summary: 'Resume a run waiting on a connector or a credential',
     tags: ['runs'],

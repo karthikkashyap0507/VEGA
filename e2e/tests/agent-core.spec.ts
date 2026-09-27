@@ -7,7 +7,8 @@ import pg from 'pg';
  * against the SANDBOX provider (the stack runs with CONNECTOR_SANDBOX_URL); a chat objective is
  * understood, planned, executed durably and streamed back; an ambiguous recipient for an
  * irreversible send stops the run for a clarification; the run inspector shows the timeline and
- * the program.
+ * the program. Module 5: the external send is held under the Balanced mode, explained, and
+ * released early from the card.
  *
  * Requires: `pnpm sandbox:providers` and the services started with CONNECTOR_SANDBOX_URL and a
  * GOOGLE_CLIENT_ID/SECRET pair (any value: the sandbox is the provider).
@@ -104,6 +105,15 @@ test('studio → connect → chat run → clarification → inspector', async ({
   await page.getByRole('button', { name: 'Send' }).click();
   const first = page.getByTestId('run-card').first();
   await expect(first.getByText('Peter → Peter Quill')).toBeVisible();
+  // Module 5: under the Balanced mode an external send is HELD with a window to pull it back,
+  // and the card explains why — every factor with its number, never colour alone.
+  await expect(first).toHaveAttribute('data-run-status', 'HELD', { timeout: 30_000 });
+  const hold = first.getByTestId('hold-card');
+  await expect(hold.getByTestId('hold-remaining')).toBeVisible();
+  await expect(hold.getByTestId('risk-explanation')).toContainText('External exposure');
+  await expect(hold.getByTestId('risk-explanation')).toContainText('external-send-hold');
+  expect(await sentTo(`peter-${suffix}@partner.example`)).toBe(0);
+  await hold.getByRole('button', { name: 'Send now' }).click();
   await expect(first).toHaveAttribute('data-run-status', 'COMPLETED', { timeout: 30_000 });
   expect(await sentTo(`peter-${suffix}@partner.example`)).toBe(1);
 
@@ -116,6 +126,8 @@ test('studio → connect → chat run → clarification → inspector', async ({
   await prompt.getByLabel(/Sam Park/).check();
   await prompt.getByRole('button', { name: 'Continue with this person' }).click();
   const second = page.getByTestId('run-card').nth(1);
+  await expect(second).toHaveAttribute('data-run-status', 'HELD', { timeout: 30_000 });
+  await second.getByTestId('hold-card').getByRole('button', { name: 'Send now' }).click();
   await expect(second).toHaveAttribute('data-run-status', 'COMPLETED', { timeout: 30_000 });
   expect(await sentTo(`sam.park-${suffix}`)).toBe(1);
   expect(await sentTo(`sam.lee-${suffix}`)).toBe(0);
@@ -132,4 +144,7 @@ test('studio → connect → chat run → clarification → inspector', async ({
   await expect(page.getByTestId('program-viewer')).toContainText('call gmail.send');
   await page.getByRole('tab', { name: /Replans/ }).click();
   await expect(page.getByText('No replans.')).toBeVisible();
+  // Module 5: every step was decided and recorded, with its reason chain.
+  await page.getByRole('tab', { name: /Policy/ }).click();
+  await expect(page.getByTestId('run-evaluations').getByTestId('risk-explanation').first()).toBeVisible();
 });

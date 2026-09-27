@@ -45,7 +45,25 @@ export interface PendingAction {
   reversibility?: 'R0' | 'R1' | 'R2' | 'R3';
   egressClass?: string;
   effect?: { summary: string; externalRecipients: string[]; recordsAffected: unknown[]; fidelity: string };
-  policy?: { decision: string; reason?: string; riskTier?: string; riskScore?: number };
+  policy?: {
+    decision: string;
+    reason?: string;
+    riskTier?: string;
+    riskScore?: number;
+    approverRole?: string | null;
+    holdWindowMs?: number | null;
+    separationOfDuties?: boolean;
+    evaluationId?: string;
+    chain?: Array<{ step: string; detail: string; id?: string; version?: number; citation?: string | null }>;
+    failClosed?: boolean;
+  };
+  /** Module 5: a dual approval needs 2 distinct approvers; who has approved so far. */
+  approvalsRequired?: number;
+  approvedBy?: string[];
+  /** Module 5: a windowed hold releases itself at releaseAt unless revoked. */
+  holdWindowMs?: number;
+  heldAt?: string;
+  releaseAt?: string;
   assumptions?: string[];
   ambiguity?: Ambiguity;
   connector?: string;
@@ -196,4 +214,6 @@ export const runActions = {
   input: (id: string, field: string, choice: string) => api.post<RunView>(`/v1/runs/${id}/input`, { field, choice }),
   cancel: (id: string) => api.post<RunView>(`/v1/runs/${id}/cancel`, {}),
   resume: (id: string) => api.post<RunView>(`/v1/runs/${id}/resume`, {}),
+  release: (id: string) => api.post<RunView>(`/v1/runs/${id}/release`, {}),
+  revoke: (id: string) => api.post<RunView>(`/v1/runs/${id}/revoke`, {}),
 };
