@@ -11,6 +11,8 @@ import { TERMINAL_RUN_STATUSES, type RunStatus } from '@vega/contracts';
  *                                             ├─▶ AWAITING_INPUT ─(signal)─▶ PLANNING / REPLANNING / EXECUTING
  *                                             ├─▶ REPLANNING ─▶ PLANNED (next version)
  *                                             ├─▶ COMPENSATING ─▶ COMPENSATED | COMPENSATION_FAILED
+ *                                                 (M6: from any live state that is about to FAIL
+ *                                                 with committed actions it can still undo)
  *                                             ├─▶ NEEDS_ATTENTION (an outcome nobody can know)
  *                                             └─▶ CANCELLED | FAILED
  *
@@ -22,14 +24,14 @@ const T: Record<RunStatus, readonly RunStatus[]> = {
   PLANNING: ['PLANNED', 'PLAN_REJECTED', 'AWAITING_INPUT', 'FAILED', 'CANCELLED'],
   PLANNED: ['EXECUTING', 'FAILED', 'CANCELLED'],
   EXECUTING: ['COMPLETED', 'AWAITING_APPROVAL', 'AWAITING_INPUT', 'HELD', 'REPLANNING', 'COMPENSATING', 'NEEDS_ATTENTION', 'FAILED', 'CANCELLED'],
-  AWAITING_APPROVAL: ['EXECUTING', 'FAILED', 'CANCELLED'],
+  AWAITING_APPROVAL: ['EXECUTING', 'COMPENSATING', 'FAILED', 'CANCELLED'],
   // → EXECUTING: resumed after a connector was re-authorized (nothing to replan).
-  AWAITING_INPUT: ['PLANNING', 'REPLANNING', 'EXECUTING', 'FAILED', 'CANCELLED'],
-  HELD: ['EXECUTING', 'FAILED', 'CANCELLED'],
+  AWAITING_INPUT: ['PLANNING', 'REPLANNING', 'EXECUTING', 'COMPENSATING', 'FAILED', 'CANCELLED'],
+  HELD: ['EXECUTING', 'COMPENSATING', 'FAILED', 'CANCELLED', 'NEEDS_ATTENTION'],
   // → AWAITING_INPUT: the new plan needs a human to resolve an ambiguity first.
-  REPLANNING: ['PLANNED', 'PLAN_REJECTED', 'AWAITING_INPUT', 'FAILED', 'CANCELLED'],
+  REPLANNING: ['PLANNED', 'PLAN_REJECTED', 'AWAITING_INPUT', 'COMPENSATING', 'FAILED', 'CANCELLED'],
   COMPENSATING: ['COMPENSATED', 'COMPENSATION_FAILED'],
-  NEEDS_ATTENTION: ['EXECUTING', 'COMPLETED', 'FAILED', 'CANCELLED'],
+  NEEDS_ATTENTION: ['EXECUTING', 'COMPLETED', 'COMPENSATING', 'FAILED', 'CANCELLED'],
   PLAN_REJECTED: [],
   COMPENSATED: [],
   COMPENSATION_FAILED: [],

@@ -870,6 +870,9 @@ importers:
       '@vega/authz':
         specifier: workspace:*
         version: link:../../packages/authz
+      '@vega/compensators':
+        specifier: workspace:*
+        version: link:../../packages/compensators
       '@vega/connector-mcp':
         specifier: workspace:*
         version: link:../../packages/connectors/mcp
@@ -995,6 +998,9 @@ importers:
 
   services/execution:
     dependencies:
+      '@vega/compensators':
+        specifier: workspace:*
+        version: link:../../packages/compensators
       '@vega/connector-mcp':
         specifier: workspace:*
         version: link:../../packages/connectors/mcp

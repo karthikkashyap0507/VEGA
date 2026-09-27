@@ -16,6 +16,7 @@
   "dependencies": {
     "@trpc/server": "^11.19.0",
     "@vega/authz": "workspace:*",
+    "@vega/compensators": "workspace:*",
     "@vega/connector-mcp": "workspace:*",
     "@vega/connector-sdk": "workspace:*",
     "@vega/connector-web": "workspace:*",

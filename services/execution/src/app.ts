@@ -4,6 +4,8 @@ import { registerConnectorApi, type ConnectorApiDeps } from './connectors.js';
 import { registerProgramApi, type ProgramApiDeps } from './programs.js';
 import { registerRunApi, type RunApiDeps } from './executor/api.js';
 import { registerPolicyApi, type PolicyEngine } from './policy/index.js';
+import { registerRollbackApi, type ReversibilityEngine } from './reversibility/index.js';
+import type { Orchestrator } from '@vega/orchestration';
 
 /**
  * Execution plane (module1.md §5.1). Module 2 adds the connector runtime behind an internal
@@ -23,6 +25,8 @@ export async function buildExecutionApp(options: {
   runs?: RunApiDeps;
   /** Module 5: the policy engine's internal classify endpoint. */
   policy?: { engine: PolicyEngine; token: string };
+  /** Module 6: explicit undo (rollbacks) and blast-radius refresh. */
+  reversibility?: Parameters<typeof registerRollbackApi>[1];
   https?: Record<string, unknown>;
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, ...(options.https ? { https: options.https } : {}) }) as unknown as FastifyInstance;
@@ -35,5 +39,6 @@ export async function buildExecutionApp(options: {
   if (options.connectors && options.programs) registerProgramApi(app, options.programs);
   if (options.runs) registerRunApi(app, options.runs);
   if (options.policy) registerPolicyApi(app, options.policy);
+  if (options.reversibility) registerRollbackApi(app, options.reversibility);
   return app;
 }

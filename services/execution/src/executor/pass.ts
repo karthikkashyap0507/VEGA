@@ -18,6 +18,7 @@ import {
   type ViolationRecord,
 } from '@vega/interpreter';
 import type { JournalRow, LoadedRun, RunStore } from '@vega/runs';
+import type { ReversibilityEngine } from '../reversibility/engine.js';
 import type { TaintLevel as Taint } from '@vega/contracts';
 
 /**
@@ -79,6 +80,8 @@ export interface ExecutorDeps {
   now?: () => number;
   /** Cost of one extraction, in cents (the only model call in the execution plane). */
   extractCostCents?: number;
+  /** Module 6: compensations bound to outcomes, divergence, holds, rollbacks. */
+  reversibility?: ReversibilityEngine | undefined;
 }
 
 export type StopReason =
@@ -91,7 +94,8 @@ export type StopReason =
   | 'receipt_unavailable'
   | 'nondeterminism'
   | 'infrastructure'
-  | 'rejected';
+  | 'rejected'
+  | 'divergence';
 
 /** What the run is waiting for. Stored in runs.pending_json; the UI's ActionCard renders it. */
 export interface PendingAction {
@@ -115,6 +119,11 @@ export interface PendingAction {
   approvedBy?: string[];
   /** A windowed hold: it releases itself at `releaseAt` unless revoked first. */
   holdWindowMs?: number;
+  /** Module 6: the action row and (once the workflow opened it) the hold row. */
+  actionId?: string;
+  holdId?: string;
+  /** The content was edited during an earlier hold of this call (edit and requeue). */
+  edited?: boolean;
   heldAt?: string;
   releaseAt?: string;
   assumptions?: string[];
@@ -360,10 +369,11 @@ export class DurablePass implements ToolPort {
     return this.cfg.run.checkpoint.bindings[key];
   }
 
-  private async chain(row: JournalRow, inv: ToolInvocation, decl: ToolDeclarationRecord, seq: number, d: string, assumptions: string[]): Promise<CallOutcome> {
+  private async chain(row: JournalRow, inv0: ToolInvocation, decl: ToolDeclarationRecord, seq: number, d0: string, assumptions: string[]): Promise<CallOutcome> {
     const { run, version, deps, approvals, released, committed } = this.cfg;
     const store = deps.store;
     const mark = (patch: Parameters<RunStore['markNode']>[3]) => store.markNode(run.tenantId, run.id, row.id, patch);
+    const { inv, d } = await this.effective(inv0, seq, d0);
 
     // A non-read that an earlier plan version already committed with these exact arguments is a
     // fact: return what happened, never do it again.
@@ -419,10 +429,15 @@ export class DurablePass implements ToolPort {
     // 2 — simulate (M6)
     const sim: SimulationResult = await hooks.simulate(sctx);
     const effect = sim.ok ? { summary: sim.effect.summary, externalRecipients: sim.effect.externalRecipients, recordsAffected: sim.effect.recordsAffected, fidelity: sim.effect.fidelity } : undefined;
-    const key = `v${version}:${seq}:${d}`;
-    if (policy.decision === 'HOLD' && !released.has(key)) {
+    const key = d === d0 ? `v${version}:${seq}:${d}` : `v${version}:${seq}:${d0}~${d.slice(0, 16)}`;
+    const held = async () => {
       await mark({ status: 'held', effect });
-      return { kind: 'suspend', status: 'held', pending: { ...base, kind: 'hold', key, reason: policy.reason ?? 'held by policy', policy, effect } };
+      return store.upsertAction(run.tenantId, { runId: run.id, nodeRowId: row.id, toolId: inv.toolId, argsDigest: d, taint: inv.gate!.argTaint, reversibility: decl.reversibility, state: 'HELD', riskScore: policy.riskScore ?? null, riskTier: policy.riskTier ?? null });
+    };
+    if (d !== d0) base.edited = true;
+    if (policy.decision === 'HOLD' && !released.has(key)) {
+      const actionId = await held();
+      return { kind: 'suspend', status: 'held', pending: { ...base, kind: 'hold', key, actionId, reason: policy.reason ?? 'held by policy', policy, effect } };
     }
     // 3 — approval (M8). The gate's REQUIRE_APPROVAL (untrusted content leaving the org) is
     // folded in, and honoured below even if an approval hook were to say PROCEED.
@@ -444,7 +459,7 @@ export class DurablePass implements ToolPort {
     // waits, revocable, and then runs by itself: `released` says its window has passed.
     const holdMs = merged.decision === 'ALLOW_WITH_HOLD' || needs(merged) ? (merged.holdWindowMs ?? null) : null;
     if (holdMs && holdMs > 0 && !released.has(key)) {
-      await mark({ status: 'held', effect });
+      const actionId = await held();
       const heldAt = (deps.now ?? Date.now)();
       return {
         kind: 'suspend',
@@ -453,6 +468,7 @@ export class DurablePass implements ToolPort {
           ...base,
           kind: 'hold',
           key,
+          actionId,
           reason: merged.reason ?? 'held by policy',
           policy: merged,
           effect,
@@ -469,8 +485,14 @@ export class DurablePass implements ToolPort {
       await mark({ status: 'failed', error: { code: 'RECEIPT_UNAVAILABLE', message: e instanceof Error ? e.message : String(e) }, end: true });
       return { kind: 'stop', reason: 'receipt_unavailable', message: `no audit receipt could be written for ${inv.toolId}; it was not called` };
     }
-    // 5 — compensator capture BEFORE the call (M6)
-    await hooks.captureCompensator(sctx, sim);
+    // 5 — compensator capture BEFORE the call (M6). No undo prepared, no call: afterwards the
+    // pre-state is gone.
+    try {
+      await hooks.captureCompensator(sctx, sim);
+    } catch (e) {
+      await mark({ status: 'failed', error: { code: 'CAPTURE_FAILED', message: e instanceof Error ? e.message : String(e) }, end: true });
+      return { kind: 'stop', reason: 'infrastructure', message: e instanceof Error ? e.message : `the undo for ${inv.toolId} could not be prepared; it was not called` };
+    }
     // The journal says `running` before the provider hears anything. An R0/R1 call made on a
     // best guess carries the assumption on its node, where the blast radius shows it (§5.1).
     await mark({ status: 'running', start: true, attempt: true, ...(effect || assumptions.length ? { effect: { ...(effect ?? {}), ...(assumptions.length ? { assumptions } : {}) } } : {}) });
@@ -478,27 +500,42 @@ export class DurablePass implements ToolPort {
       await store.upsertAction(run.tenantId, { runId: run.id, nodeRowId: row.id, toolId: inv.toolId, argsDigest: d, taint: inv.gate!.argTaint, reversibility: decl.reversibility, state: 'PLANNED', riskScore: policy.riskScore ?? null, riskTier: policy.riskTier ?? null });
     }
     try {
-      return await this.call(row, inv, decl, sctx, d, assumptions);
+      return await this.call(row, inv, decl, sctx, d, assumptions, sim);
     } catch (e) {
       throw new CalledError(e);
     }
   }
 
+  /**
+   * Edit and requeue (M6 §5.5): a person changed the CONTENT during a hold of this call. The
+   * program still computes the original arguments (the journal checks those); what is decided
+   * and sent is the edited version, under its own key — a new policy decision, a new hold.
+   */
+  private async effective(inv: ToolInvocation, seq: number, d0: string): Promise<{ inv: ToolInvocation; d: string }> {
+    const { run, version, deps } = this.cfg;
+    const holdId = run.checkpoint.edits?.[`v${version}:${seq}:${d0}`];
+    if (!holdId || !deps.reversibility) return { inv, d: d0 };
+    const { editedArgs } = await deps.reversibility.deps.store.openArtifact(run.tenantId, holdId);
+    return editedArgs ? { inv: { ...inv, args: editedArgs }, d: argsDigest(editedArgs) } : { inv, d: d0 };
+  }
+
   /** A row left `running` by a process that died mid-call. */
-  private async recover(row: JournalRow, inv: ToolInvocation, decl: ToolDeclarationRecord, seq: number, d: string, _assumptions: string[]): Promise<CallOutcome> {
+  private async recover(row: JournalRow, inv0: ToolInvocation, decl: ToolDeclarationRecord, seq: number, d0: string, _assumptions: string[]): Promise<CallOutcome> {
     const { run, deps } = this.cfg;
+    const { inv, d } = await this.effective(inv0, seq, d0);
     const sctx = this.stepContext(inv, decl, seq, row.id);
     if (decl.reversibility === READ || decl.idempotency === 'KEYED' || decl.idempotency === 'NATIVE') {
       deps.log.warn({ run_id: run.id, tool_id: inv.toolId, call_seq: seq }, 'recovering a call that was in flight when the executor stopped');
       return this.call(row, inv, decl, sctx, d);
     }
     await persist(() => deps.store.markNode(run.tenantId, run.id, row.id, { status: 'unknown', error: { code: 'OUTCOME_UNKNOWN', message: 'the executor stopped mid-call; this tool has no idempotency key' }, end: true }));
-    await persist(() => deps.store.upsertAction(run.tenantId, { runId: run.id, nodeRowId: row.id, toolId: inv.toolId, argsDigest: d, taint: inv.gate!.argTaint, reversibility: decl.reversibility, state: 'UNKNOWN' }));
+    const actionId = await persist(() => deps.store.upsertAction(run.tenantId, { runId: run.id, nodeRowId: row.id, toolId: inv.toolId, argsDigest: d, taint: inv.gate!.argTaint, reversibility: decl.reversibility, state: 'UNKNOWN' }));
+    await deps.reversibility?.bind(run.tenantId, row.id, 'unknown', actionId).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'could not record the unknown outcome on its compensation'));
     await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'unknown' }).catch(() => undefined);
     return { kind: 'stop', reason: 'unknown_outcome', message: `${inv.toolId} may or may not have happened: the executor stopped mid-call and the tool cannot be safely retried` };
   }
 
-  private async call(row: JournalRow, inv: ToolInvocation, decl: ToolDeclarationRecord, sctx: StepContext, d: string, assumptions: string[] = []): Promise<CallOutcome> {
+  private async call(row: JournalRow, inv: ToolInvocation, decl: ToolDeclarationRecord, sctx: StepContext, d: string, assumptions: string[] = [], sim?: SimulationResult): Promise<CallOutcome> {
     const { run, version, deps } = this.cfg;
     const connectorId = this.binding(inv.toolId, decl);
     let result: ToolResult<unknown>;
@@ -514,8 +551,16 @@ export class DurablePass implements ToolPort {
       }
     }
     const nonRead = decl.reversibility !== READ;
-    const action = (state: 'COMMITTED' | 'FAILED' | 'UNKNOWN', effect?: unknown) =>
-      nonRead ? persist(() => deps.store.upsertAction(run.tenantId, { runId: run.id, nodeRowId: row.id, toolId: inv.toolId, argsDigest: d, taint: inv.gate!.argTaint, reversibility: decl.reversibility, state, effect })) : Promise.resolve();
+    const rev = deps.reversibility;
+    const action = async (state: 'COMMITTED' | 'FAILED' | 'UNKNOWN', effect?: unknown): Promise<string | null> => {
+      if (!nonRead) return null;
+      const id = await persist(() => deps.store.upsertAction(run.tenantId, { runId: run.id, nodeRowId: row.id, toolId: inv.toolId, argsDigest: d, taint: inv.gate!.argTaint, reversibility: decl.reversibility, state, effect }));
+      // The compensation learns what happened: the TTL starts and the saga order is fixed.
+      // A failure that does not PROVE nothing happened keeps the undo available (outcome unknown).
+      const outcome = state === 'UNKNOWN' || (!result.ok && !PROVABLY_NOT_APPLIED.has(result.error.code)) ? 'unknown' : result;
+      if (rev) await persist(() => rev.bind(run.tenantId, row.id, outcome, id));
+      return id;
+    };
     const mark = (patch: Parameters<RunStore['markNode']>[3]) => persist(() => deps.store.markNode(run.tenantId, run.id, row.id, patch));
 
     if (!result.ok) {
@@ -532,10 +577,13 @@ export class DurablePass implements ToolPort {
     }
     const effect = summarize(result);
     await mark({ status: 'done', result, effect: { ...effect, ...(assumptions.length ? { assumptions } : {}) }, end: true });
-    await action('COMMITTED', effect);
+    const actionId = await action('COMMITTED', effect);
+    // 6 — divergence (M6 §5.7): the actual effect against what was simulated and approved.
+    const div = rev && sim ? await rev.diverged(sctx, sim, result.effect, actionId).catch((e) => (deps.log.error({ err: e, run_id: run.id }, 'divergence check failed'), { abort: false, message: '' })) : { abort: false, message: '' };
     // 7 — verify (M9), then 8 — the post receipt (M7)
     const v = await deps.hooks.verify(sctx, { effect: result.effect });
     await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'committed', effect }).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'post-receipt failed'));
+    if (div.abort) return { kind: 'stop', reason: 'divergence', message: `${div.message}: the run was stopped and what it did is being undone` };
     if (!v.ok) return { kind: 'stop', reason: 'verify_failure', message: `verification failed for ${inv.toolId}: ${v.reason}` };
     return { kind: 'result', result };
   }

@@ -23,6 +23,8 @@ import { EvidenceAppendClient } from './evidence-append.js';
 import { executionHooks, RUN_WORKFLOW, runWorkflow, type RunTokenCheck } from './executor/index.js';
 import { policyEngineFromEnv } from './policy/index.js';
 import { RuntimeDeclarations } from './programs.js';
+import { ReversibilityStore } from '@vega/compensators';
+import { ntfyNotifier, ntfyPager, ReversibilityEngine, ROLLBACK_WORKFLOW, rollbackWorkflow, valkeyCache } from './reversibility/index.js';
 
 const logger = createLogger('execution');
 const env = process.env;
@@ -41,9 +43,11 @@ const webFetchUrl = env['WEB_FETCH_URL'];
 if (webFetchUrl) setWebBackend(remoteBackend(webFetchUrl, tls ? mtlsFetch(tls) : undefined));
 else if (production) throw new Error('WEB_FETCH_URL is required in production: execution does not fetch the web itself');
 let buckets: TokenBucket = new MemoryTokenBucket();
+let valkeyClient: Valkey | undefined;
 try {
   const valkey = new Valkey(env['VALKEY_URL'] ?? 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 });
   await valkey.connect();
+  valkeyClient = valkey;
   buckets = new ValkeyTokenBucket({ script: (src, keys, args) => valkey.call('EVAL', src, keys.length, ...keys, ...args) });
 } catch (error) {
   if (production) throw error;
@@ -117,6 +121,22 @@ const policy = policyEngineFromEnv(env, logger, production);
 
 const store = new RunStore();
 const declarations = new RuntimeDeclarations(registry, runtime);
+
+// ---------------------------------------------------------------- reversibility (Module 6)
+// Compensations captured before every R1 call, holds settled by compare-and-set, sagas on failure.
+const pushSecret = env['PUSH_TOPIC_SECRET'];
+if (!pushSecret) logger.warn('PUSH_TOPIC_SECRET unset: held actions are not pushed to phones (revoke in the app still works)');
+const reversibility = new ReversibilityEngine({
+  store: new ReversibilityStore(),
+  port: { capture: (i) => runtime.capture(i), compensate: (i) => runtime.compensate(i), describeCompensation: (t) => runtime.describeCompensation(t) },
+  log: logger,
+  pager: env['NTFY_URL'] ? ntfyPager(env['NTFY_URL']) : { page: async (i) => logger.error({ alert: true, ...i }, 'INCIDENT (no pager configured)') },
+  notifier: env['NTFY_URL'] ? ntfyNotifier(env['NTFY_URL']) : undefined,
+  cache: valkeyClient ? valkeyCache(valkeyClient) : undefined,
+  audit: evidence ? { append: async (e) => void (await evidence.append(e)) } : undefined,
+  publicUrl: env['GATEWAY_PUBLIC_URL'] ?? 'http://localhost:3001',
+  pushSecret,
+});
 const orchestrator = dbosUrl ? new DbosOrchestrator({ appName: 'vega-execution', systemDatabaseUrl: dbosUrl, logLevel: env['DBOS_LOG_LEVEL'] ?? 'warn' }) : undefined;
 if (orchestrator && internalToken) {
   const invoker = { execute: (i: Parameters<ConnectorRuntime['execute']>[0]) => runtime.execute(i), simulate: (i: Parameters<ConnectorRuntime['simulate']>[0]) => runtime.simulate(i) };
@@ -128,14 +148,16 @@ if (orchestrator && internalToken) {
       declarations,
       extractor,
       entities: new PgEntities(),
-      hooks: executionHooks({ log: logger, invoker, evidence, requireEvidence: production, policy: (ctx) => policy.decide(ctx) }),
+      hooks: executionHooks({ log: logger, invoker, evidence, requireEvidence: production, policy: (ctx) => policy.decide(ctx), reversibility }),
       schemas: new SchemaRegistry(),
       recorder: () => new PgRecorder(),
       log: logger,
       pager,
       requireGrant: true,
+      reversibility,
     }),
   );
+  orchestrator.register(ROLLBACK_WORKFLOW, rollbackWorkflow(reversibility));
   await orchestrator.launch(); // recovers every run that was in flight when the last process died
   logger.info('durable executor launched');
 }
@@ -145,6 +167,9 @@ const app = await buildExecutionApp({
   ...(internalToken ? { connectors: { runtime, mcpStore, token: internalToken }, programs: { runtime, registry, extractor, entities: new PgEntities(), pager } } : {}),
   ...(internalToken && orchestrator ? { runs: { orchestrator, store, token: internalToken, runTokens, log: logger } } : {}),
   ...(internalToken ? { policy: { engine: policy, token: internalToken } } : {}),
+  ...(internalToken && orchestrator
+    ? { reversibility: { engine: reversibility, orchestrator, token: internalToken, blast: { deps: { invoker: { execute: (i) => runtime.execute(i), simulate: (i) => runtime.simulate(i) }, declarations, extractor, entities: new PgEntities(), schemas: new SchemaRegistry() }, runs: store } } }
+    : {}),
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });
 const port = Number(env['EXECUTION_PORT'] ?? 3003);

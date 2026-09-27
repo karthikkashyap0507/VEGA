@@ -4,6 +4,7 @@ import { evaluate, type RunContext } from '@vega/interpreter';
 import type { DurableContext } from '@vega/orchestration';
 import { TransitionError, type LoadedRun } from '@vega/runs';
 import { DurablePass, type CommittedFact, type ExecutorDeps, type PendingAction } from './pass.js';
+import { programBlastRadius } from '../reversibility/blast.js';
 
 /**
  * THE RUN WORKFLOW — one durable workflow per run (docs/module4.md §5.3; engine: DBOS, D-13).
@@ -38,7 +39,7 @@ export interface RunOutcome {
 export type DecisionMessage = { key: string; decision: 'approve' | 'reject'; by: string; note?: string };
 export type InputMessage = { field: string; choice: string; by: string };
 export type ProgramMessage = { version: number } | { abort: string };
-export type ResumeMessage = { action?: 'resume' | 'release' | 'revoke'; by?: string };
+export type ResumeMessage = { action?: 'resume' | 'release' | 'revoke' | 'edit'; by?: string; holdId?: string };
 
 export function expirySeconds(expiry: string): number {
   const m = /^(\d+)([mhd])$/.exec(expiry);
@@ -64,6 +65,7 @@ export function runWorkflow(deps: ExecutorDeps) {
     const memo = new Map<string, unknown>();
     const approvals = new Set<string>();
     const released = new Set<string>();
+    const blasted = new Set<number>();
 
     /** A status change is a step: recorded once, replayed rather than repeated. */
     const transition = (name: string, to: RunStatus, opts: Parameters<ExecutorDeps['store']['setStatus']>[3] = {}) =>
@@ -80,8 +82,29 @@ export function runWorkflow(deps: ExecutorDeps) {
         },
         { retries: 5 },
       );
-    const end = async (name: string, to: RunStatus, reason: string, extra: { error?: unknown; actorId?: string | null } = {}): Promise<RunOutcome> => {
+    const end = async (name: string, to: RunStatus, reason: string, extra: { error?: unknown; actorId?: string | null; trigger?: 'run_failure' | 'divergence' | 'verification' } = {}): Promise<RunOutcome> => {
       await ctx.step(`${name}:skip`, () => deps.store.skipPending(tenantId, runId), { retries: 5 });
+      // THE SAGA (M6 §5.8): a run that fails with committed actions it can still undo compensates
+      // them — strict reverse order of commitment — and ends COMPENSATED or COMPENSATION_FAILED.
+      const rev = deps.reversibility;
+      if (to === 'FAILED' && rev) {
+        const plan = await ctx.step(`${name}:saga:plan`, async () => {
+          const rb = await rev.plan(tenantId, { runId, scope: 'run', trigger: extra.trigger ?? 'run_failure', requestedBy: null, requestedAt: new Date(), });
+          return { id: rb.id, n: rb.compensationIds.length };
+        }, { retries: 5 });
+        if (plan.n > 0) {
+          const t = await transition(`${name}:compensating`, 'COMPENSATING', { reason: `${reason} — undoing ${plan.n} action${plan.n === 1 ? '' : 's'} it had done`, ...(extra.error !== undefined ? { error: extra.error } : {}) });
+          if (!t.ok) return { status: t.from };
+          const agent = await ctx.step(`${name}:saga:agent`, async () => (await deps.store.load(tenantId, runId))?.agentId ?? null, { retries: 5 });
+          const out = await rev.rollback(ctx, tenantId, plan.id, { agentId: agent ?? undefined });
+          const done = out.state === 'failed' ? 'COMPENSATION_FAILED' : 'COMPENSATED';
+          const summary = out.state === 'failed'
+            ? `${reason}. Undo failed on ${out.failed!.toolId} (${out.failed!.error.code}); ${out.reversed.length} undone, ${out.notAttempted.length} not attempted — see the incident`
+            : `${reason}. Undid ${out.reversed.length} action${out.reversed.length === 1 ? '' : 's'}${out.permanent.length ? `; ${out.permanent.length} could no longer be undone` : ''}`;
+          const t2 = await transition(`${name}:${done.toLowerCase()}`, done, { reason: summary, error: { cause: extra.error ?? reason, rollback: out } });
+          return t2.ok ? { status: done, reason: summary } : { status: t2.from };
+        }
+      }
       const t = await transition(name, to, { reason, ...(extra.error !== undefined ? { error: extra.error } : {}), ...(extra.actorId !== undefined ? { actorId: extra.actorId } : {}) });
       return t.ok ? { status: to, reason } : { status: t.from };
     };
@@ -97,7 +120,7 @@ export function runWorkflow(deps: ExecutorDeps) {
         `program:v${version}:p${passNo}`,
         async () => {
           const p = await deps.store.program(tenantId, runId, version);
-          return p ? { ast: p.ast, modelId: p.modelId, createdAt: p.createdAt.toISOString() } : null;
+          return p ? { ast: p.ast, modelId: p.modelId, createdAt: p.createdAt.toISOString(), digest: p.digest } : null;
         },
         { retries: 5 },
       );
@@ -120,6 +143,23 @@ export function runWorkflow(deps: ExecutorDeps) {
         version > 1
           ? await ctx.step(`committed:v${version}:p${passNo}`, async () => (await deps.store.committed(tenantId, runId)).filter((c) => c.version < version), { retries: 5 })
           : [];
+
+      // M6 §5.6: before a program version first runs, its blast radius — every call simulated
+      // (reads executed), aggregated, stored. A preview: it never blocks or fails the run.
+      const rev = deps.reversibility;
+      if (rev && !blasted.has(version)) {
+        blasted.add(version);
+        await ctx.step(`blast:v${version}`, async () => {
+          try {
+            const out = await programBlastRadius(deps, { tenantId, runId, bindings: run.checkpoint.bindings, program, modelId: prog.modelId, now: prog.createdAt, inputs: runInputs(run), maxCollection: run.spec.limits.maxFanout });
+            await rev.deps.store.saveBlastRadius(tenantId, { runId, programVersion: version, programDigest: prog.digest ?? '', effects: out.effects, summary: out.summary });
+            return out.summary.consequential;
+          } catch (e) {
+            deps.log.warn({ err: e, run_id: runId }, 'blast radius could not be computed; the run continues without a preview');
+            return -1;
+          }
+        });
+      }
 
       const enter = await transition(`executing:${passNo}`, 'EXECUTING', { reason: null, pending: null });
       if (!enter.ok) return { status: enter.from };
@@ -197,9 +237,62 @@ export function runWorkflow(deps: ExecutorDeps) {
         const pending = suspension.pending;
         const t = await transition(`held:${passNo}`, 'HELD', { reason: pending.reason, pending });
         if (!t.ok) return { status: t.from };
+        const rev = deps.reversibility;
+        if (pending.kind === 'hold' && pending.key && rev && pending.nodeRowId) {
+          // M6 §5.5: the hold is a ROW. A person's revoke / release / edit is committed on it by a
+          // compare-and-set (the control plane), and so is the timer's release (here): whichever
+          // commits first is what happened, across restarts. The message only wakes us early.
+          const key = pending.key;
+          const windowless = !pending.holdWindowMs;
+          const hold = await ctx.step(`hold:${passNo}:open`, () =>
+            rev.openHold({
+              tenantId,
+              runId,
+              principalUserId: run.principalUserId,
+              agentId: run.agentId,
+              nodeRowId: pending.nodeRowId!,
+              actionId: pending.actionId ?? null,
+              holdKey: key,
+              toolId: pending.toolId ?? 'action',
+              windowMs: pending.holdWindowMs ?? null,
+              heldAt: pending.heldAt ? Date.parse(pending.heldAt) : Date.now(),
+              artifact: { toolId: pending.toolId ?? '', args: pending.args ?? {}, effect: pending.effect ? { ...pending.effect } : null, reason: pending.reason },
+            }).then((h) => ({ id: h.id, expiresAt: h.expiresAt.toISOString() })),
+            { retries: 5 },
+          );
+          await ctx.step(`hold:${passNo}:pending`, () => deps.store.setStatus(tenantId, runId, 'HELD', { pending: { ...pending, holdId: hold.id, releaseAt: pending.holdWindowMs ? hold.expiresAt : undefined } }).catch(() => undefined), { retries: 3 });
+          let settled: { state: string; by: string | null } | null = null;
+          for (let i = 0; i < 50 && !settled; i++) {
+            const remaining = Math.max(0, Date.parse(hold.expiresAt) - (await ctx.now())) / 1000;
+            const m = await ctx.recv<ResumeMessage>(TOPICS.resume, Math.max(0.05, remaining));
+            const s = await ctx.step(`hold:${passNo}:settle:${i}`, () => rev.settleHold(tenantId, hold.id, !m, windowless), { retries: 5 });
+            if (s.state !== 'holding') settled = s;
+          }
+          const st = settled?.state ?? 'missing';
+          if (st === 'revoked') {
+            await ctx.step(`revoke:${passNo}`, () => deps.store.markNode(tenantId, runId, pending.nodeRowId!, { status: 'skipped', error: { code: 'REVOKED', by: settled?.by ?? null }, end: true }), { retries: 5 });
+            return end(`revoked:${passNo}`, 'CANCELLED', `revoked during its hold window (${pending.toolId ?? 'action'} never ran)`, { actorId: settled?.by ?? null });
+          }
+          if (st === 'edited_requeued') {
+            await ctx.step(`edited:${passNo}`, () => deps.store.updateCheckpoint(tenantId, runId, (cp) => ({ ...cp, edits: { ...(cp.edits ?? {}), [key.split('~')[0]!]: hold.id } })), { retries: 5 });
+            deps.log.info({ run_id: runId, key }, 'held action edited; deciding it again');
+            continue;
+          }
+          if (st === 'released' || st === 'expired_released') {
+            released.add(key);
+            await ctx.step(`released:${passNo}`, () => deps.store.updateCheckpoint(tenantId, runId, (cp) => ({ ...cp, released: [...new Set([...(cp.released ?? []), key])] })), { retries: 5 });
+            deps.log.info({ run_id: runId, key, early: st === 'released' }, st === 'released' ? 'hold released early' : 'hold window passed; releasing');
+            continue;
+          }
+          if (st === 'expired') return end(`heldexpired:${passNo}`, 'FAILED', 'held for 7 days without release');
+          // A hold whose state cannot be established is never released on a guess.
+          const why = `the hold on ${pending.toolId ?? 'an action'} could not be settled (${st}); it was not released`;
+          await ctx.step(`hold:${passNo}:attention`, () => rev.deps.store.openIncident(tenantId, { kind: 'hold_ambiguous', severity: 'HIGH', title: why, runId, actionId: pending.actionId ?? null, detail: { holdId: hold.id, state: st } }), { retries: 5 });
+          const a = await transition(`attention:${passNo}`, 'NEEDS_ATTENTION', { reason: why, pending: { kind: 'attention', reason: why } });
+          return a.ok ? { status: 'NEEDS_ATTENTION', reason: why } : { status: a.from };
+        }
         if (pending.kind === 'hold' && pending.key && pending.holdWindowMs) {
-          // A policy hold (ALLOW_WITH_HOLD): the window is a durable wait. It ends by itself —
-          // the action then runs — or early: `release` runs it now, `revoke` cancels it.
+          // Without the reversibility engine (tests of the executor alone): the M5 behaviour.
           const key = pending.key;
           const m = await ctx.recv<ResumeMessage>(TOPICS.resume, Math.ceil(pending.holdWindowMs / 1000));
           if (m?.action === 'revoke') {
@@ -210,7 +303,6 @@ export function runWorkflow(deps: ExecutorDeps) {
           }
           released.add(key);
           await ctx.step(`released:${passNo}`, () => deps.store.updateCheckpoint(tenantId, runId, (cp) => ({ ...cp, released: [...new Set([...(cp.released ?? []), key])] })), { retries: 5 });
-          deps.log.info({ run_id: runId, key, by: m?.by ?? null, early: Boolean(m) }, m ? 'hold released early' : 'hold window passed; releasing');
           continue;
         }
         const m = await ctx.recv<ResumeMessage>(TOPICS.resume, 7 * DAY);
@@ -265,6 +357,7 @@ export function runWorkflow(deps: ExecutorDeps) {
           const t = await transition(`attention:${passNo}`, 'NEEDS_ATTENTION', { reason: stop.message, pending: { kind: 'attention', reason: stop.message } });
           return t.ok ? { status: 'NEEDS_ATTENTION', reason: stop.message } : { status: t.from };
         }
+        if (stop.reason === 'divergence') return end(`diverged:${passNo}`, 'FAILED', stop.message, { error: { reason: 'divergence' }, trigger: 'divergence' });
         if (stop.reason === 'policy_denial' || stop.reason === 'verify_failure') {
           const out = await replan(stop.reason, { message: stop.message });
           if (out) return out;

@@ -11,6 +11,8 @@ import { type HOOK_ORDER, type Hooks, type PolicyDecision, type StepContext } fr
 import { RunStore } from '@vega/runs';
 import { RuntimeDeclarations } from '../src/programs.js';
 import { executionHooks, type ExecutorDeps, type ExecutorLog, type ToolInvoker } from '../src/executor/index.js';
+import { ReversibilityStore } from '@vega/compensators';
+import { ReversibilityEngine, type EngineDeps } from '../src/reversibility/index.js';
 import { devModel, Extractor } from '../../extractor/src/extract.js';
 
 /**
@@ -84,7 +86,7 @@ export async function ownerQuery<T extends pg.QueryResultRow = Record<string, un
 }
 
 /** A connector authorized against the fakes (token issued directly: this suite is not about OAuth). */
-export async function connect(t: Tenant, kind: 'gmail' | 'gcal', grant: (scopes: string[]) => { access: string; refresh: string }): Promise<string> {
+export async function connect(t: Tenant, kind: 'gmail' | 'gcal' | 'gdrive' | 'slack', grant: (scopes: string[]) => { access: string; refresh: string }): Promise<string> {
   const registry = launchRegistry();
   const tools = registry.toolsFor(kind);
   const scopes = [...new Set(tools.flatMap((x) => x.scopes))];
@@ -148,6 +150,8 @@ export interface ExecutorKit {
   issuer: RunTokenIssuer;
   verifier: RunTokenVerifier;
   hookLog: HookRecorder;
+  /** Module 6, when the kit was built with `reversibility`. */
+  engine?: ReversibilityEngine;
   /** Called with (runId, callSeq) as the provider call is made, after every pre-call hook. */
   onExecute?: ((i: { runId: string; nodeId: string; toolId: string }) => Promise<void> | void) | undefined;
 }
@@ -161,7 +165,7 @@ export const allowAllPolicyForExecutorTests = async (): Promise<PolicyDecision> 
 
 export async function executorKit(
   fetchImpl: typeof fetch,
-  opts: { extractor?: ExtractorPort; hooks?: (h: Hooks) => Hooks; policy?: (ctx: StepContext) => Promise<PolicyDecision> } = {},
+  opts: { extractor?: ExtractorPort; hooks?: (h: Hooks) => Hooks; policy?: (ctx: StepContext) => Promise<PolicyDecision>; reversibility?: Partial<EngineDeps> | boolean } = {},
 ): Promise<ExecutorKit> {
   const runtime = runtimeFor(fetchImpl);
   const registry = launchRegistry();
@@ -178,7 +182,16 @@ export async function executorKit(
     },
     simulate: (i) => runtime.simulate(i),
   };
-  const base = executionHooks({ log: silent, invoker, requireEvidence: false, policy: opts.policy ?? allowAllPolicyForExecutorTests });
+  if (opts.reversibility) {
+    kit.engine = new ReversibilityEngine({
+      store: new ReversibilityStore(),
+      port: { capture: (i) => runtime.capture(i), compensate: (i) => runtime.compensate(i), describeCompensation: (tok) => runtime.describeCompensation(tok) },
+      log: silent,
+      publicUrl: 'https://api.test',
+      ...(typeof opts.reversibility === 'object' ? opts.reversibility : {}),
+    });
+  }
+  const base = executionHooks({ log: silent, invoker, requireEvidence: false, policy: opts.policy ?? allowAllPolicyForExecutorTests, reversibility: kit.engine });
   kit.deps = {
     store,
     invoker,
@@ -190,6 +203,7 @@ export async function executorKit(
     recorder: () => new PgRecorder(),
     log: silent,
     requireGrant: true,
+    reversibility: kit.engine,
   };
   return kit;
 }

@@ -114,3 +114,19 @@ describe('edit and requeue', () => {
     expect(applyEdit(send, args, { body: 'Old' }, { userId: 'u', at: new Date(0) })).toMatchObject({ ok: false, problems: ['nothing changed'] });
   });
 });
+
+describe('revoke capability', async () => {
+  const { mintRevokeToken, parseRevokeToken, pushTopic } = await import('../src/index.js');
+  it('round-trips the tenant and hashes the secret part', () => {
+    const t = '6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b';
+    const { token, hash } = mintRevokeToken(t);
+    expect(parseRevokeToken(token)).toEqual({ tenantId: t, hash });
+    expect(parseRevokeToken(token.slice(0, -1) + (token.endsWith('A') ? 'B' : 'A'))!.hash).not.toBe(hash);
+    expect(parseRevokeToken('hr1.nope')).toBeNull();
+  });
+  it('push topics are stable per user and differ between users and secrets', () => {
+    expect(pushTopic('u1', 's')).toBe(pushTopic('u1', 's'));
+    expect(pushTopic('u1', 's')).not.toBe(pushTopic('u2', 's'));
+    expect(pushTopic('u1', 's')).not.toBe(pushTopic('u1', 't'));
+  });
+});

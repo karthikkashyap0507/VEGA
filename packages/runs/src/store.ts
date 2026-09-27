@@ -27,6 +27,8 @@ export interface RunCheckpoint {
   approvals: string[];
   /** Hold keys (same shape) whose hold window passed or that someone released early (Module 5). */
   released?: string[] | undefined;
+  /** Module 6 edit and requeue: original call key → the hold whose edited content replaces it. */
+  edits?: Record<string, string> | undefined;
   /** Verified claims of the latest run token (never the token itself). */
   grant?: Grant | undefined;
   answers?: Array<{ field: string; choice: string; by: string; at: string }> | undefined;
@@ -436,8 +438,8 @@ export class RunStore {
   async upsertAction(
     tenantId: string,
     a: { runId: string; nodeRowId: string; toolId: string; argsDigest: string; taint: string; reversibility: string; state: 'PLANNED' | 'COMMITTED' | 'FAILED' | 'UNKNOWN' | 'HELD'; effect?: unknown; riskScore?: number | null; riskTier?: string | null },
-  ): Promise<void> {
-    await withTenant(tenantId, (db) =>
+  ): Promise<string> {
+    const [row] = await withTenant(tenantId, (db) =>
       db
         .insert(schema.actions)
         .values({
@@ -456,9 +458,11 @@ export class RunStore {
         })
         .onConflictDoUpdate({
           target: schema.actions.nodeId,
-          set: { state: a.state, ...(a.effect !== undefined ? { effectJson: a.effect } : {}), ...(a.state === 'COMMITTED' ? { committedAt: new Date() } : {}) },
-        }),
+          set: { state: a.state, argsDigest: a.argsDigest, ...(a.effect !== undefined ? { effectJson: a.effect } : {}), ...(a.state === 'COMMITTED' ? { committedAt: new Date() } : {}) },
+        })
+        .returning({ id: schema.actions.id }),
     );
+    return row!.id;
   }
 
   /** Planned calls that never ran (a branch not taken, a run that stopped) become `skipped`. */

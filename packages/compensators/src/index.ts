@@ -19,6 +19,7 @@ export type {
   HoldOnlyCompensator,
 } from '@vega/connector-sdk';
 export * from './blast-radius.js';
+export * from './capability.js';
 export * from './divergence.js';
 export * from './edit.js';
 export * from './lifecycle.js';
