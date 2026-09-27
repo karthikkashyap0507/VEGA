@@ -52,13 +52,32 @@ async function actable(ctx: AuthedContext, id: string): Promise<RunView> {
   return run;
 }
 
-/** Release or revoke a held action: its principal, or anyone who decides approvals. */
+/**
+ * Release or revoke a run's held action: its principal, or anyone who decides approvals.
+ * Module 6: when the hold is a row (it always is once the reversibility engine runs), the
+ * decision is committed on it by compare-and-set — the same arbiter the timer uses — and then
+ * the run is woken. Time-to-Undo is recorded for a revoke.
+ */
 async function holdAction(ctx: AuthedContext, id: string, action: 'release' | 'revoke'): Promise<RunView> {
   const run = await readable(ctx, id);
   if (run.principalUserId !== ctx.principal.userId) requireCapability(ctx, 'approvals.decide');
-  const pending = run.pending as { kind?: string; key?: string; toolId?: string } | null;
+  const pending = run.pending as { kind?: string; key?: string; toolId?: string; holdId?: string } | null;
   if (run.status !== 'HELD' || pending?.kind !== 'hold') throw new ProblemError(problems.preconditionFailed('this run has no action in a hold window'));
   const { core } = agentCore(ctx);
+  const rev = ctx.deps.reversibility;
+  const hold = rev ? (pending.holdId ? await rev.store.hold(run.tenantId, pending.holdId) : (await rev.store.holds(run.tenantId, { runId: run.id, states: ['holding'], limit: 1 }))[0]) : null;
+  if (rev && hold) {
+    const requestedAt = new Date();
+    const out = await rev.store.decideHold(run.tenantId, hold.id, action === 'revoke' ? 'revoked' : 'released', { by: ctx.principal.userId, channel: 'app', requestedAt });
+    if (!out.won) throw new ProblemError(problems.conflict(`too late: the held action is already ${out.hold?.state ?? 'settled'}`));
+    if (action === 'revoke') await rev.store.recordUndo(run.tenantId, { runId: run.id, actionId: hold.actionId, toolId: hold.toolId, kind: 'revoke', channel: 'app', requestedAt, restoredAt: new Date(), succeeded: true });
+    try {
+      await core.execution.signalRun({ tenantId: run.tenantId, runId: run.id, topic: 'resume', message: { action, by: ctx.principal.userId, holdId: hold.id } });
+    } catch (e) {
+      ctx.log.warn({ err: e, run_id: run.id }, 'decision committed; the run will settle it at the end of its window');
+    }
+    return run;
+  }
   await ctx.db((db) =>
     db.insert(schema.platformEvents).values({ tenantId: run.tenantId, actorId: ctx.principal.userId, kind: action === 'release' ? 'run.hold_released' : 'run.hold_revoked', payload: { runId: run.id, key: pending.key ?? null, toolId: pending.toolId ?? null } }),
   );

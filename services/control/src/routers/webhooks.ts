@@ -34,6 +34,14 @@ export const WEBHOOK_EVENT_KINDS = [
   'policy.activated',
   'policy.denied_action',
   'risk.critical',
+  // Module 6 (docs/module6.md §7); compensation.failed is an incident
+  'action.held',
+  'action.released',
+  'action.revoked',
+  'compensation.started',
+  'compensation.succeeded',
+  'compensation.failed',
+  'divergence.detected',
 ] as const;
 
 const endpointView = (e: typeof schema.webhookEndpoints.$inferSelect) => ({

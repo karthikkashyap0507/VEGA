@@ -12,6 +12,7 @@ import { heuristicMentions, llmMentions } from './agent/intent.js';
 import { loadRunTokenIssuer } from './agent/tokens.js';
 import { plannerRoute } from './agent/routing.js';
 import { loadBundleKey, PolicyPublisher } from './policy/publisher.js';
+import { ReversibilityStore } from '@vega/compensators';
 import { PgMcpToolStore } from '@vega/connector-mcp';
 import { launchRegistry, oauthClientsFromEnv } from '@vega/connectors';
 import { HttpExecutionClient } from './connectors/deps.js';
@@ -162,8 +163,24 @@ try {
   logger.warn({ err: error }, 'DEV: policy distribution unavailable (object storage down?): building and activating bundles answers 503; OPA keeps what it has');
 }
 
+// ---------------------------------------------------------------- reversibility (Module 6)
+// Revokes read precomputed authorization from Valkey (the execution plane writes it when a hold
+// opens); the database is the fallback and always the source of truth.
+let revokeCache: { get(key: string): Promise<string | null> } | undefined;
+try {
+  const Valkey = (await import('iovalkey')).default;
+  const client = new Valkey(env['VALKEY_URL'] ?? 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 });
+  await client.connect();
+  revokeCache = { get: (k) => client.get(k) };
+} catch (error) {
+  if (production) throw error;
+  logger.warn({ err: error }, 'DEV: Valkey unreachable; revokes use the database (slower, still correct)');
+}
+if (!env['PUSH_TOPIC_SECRET']) logger.warn('PUSH_TOPIC_SECRET unset: the console cannot show anyone their push topic');
+const reversibility = { store: new ReversibilityStore(), cache: revokeCache, pushSecret: env['PUSH_TOPIC_SECRET'] };
+
 const app = await buildControlApp({
-  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}) },
+  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility },
   verifier,
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });

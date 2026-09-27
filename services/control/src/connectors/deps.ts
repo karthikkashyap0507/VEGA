@@ -72,6 +72,10 @@ export interface ExecutionClient {
   programCatalog(): Promise<{ schemas: Array<{ name: string; description: string; jsonSchema: Record<string, unknown> }>; templates: string[] }>;
   health(tenantId: string, connectorId: string): Promise<ProbeReport>;
   discoverMcp(tenantId: string, connectorId: string): Promise<Array<{ toolId: string; name: string; declaredBy: string }>>;
+  /** Module 6: run an undo (a rollback) in the execution plane. */
+  startRollback?(input: { tenantId: string; runId: string; scope: 'action' | 'run'; compensationId?: string | undefined; requestedBy: string; requestedAt: string; agentId?: string | undefined }): Promise<{ rollbackId: string; compensations: string[] }>;
+  /** Module 6: re-simulate a run's current program. */
+  refreshBlastRadius?(tenantId: string, runId: string): Promise<{ id: string; programVersion: number; summary: unknown }>;
 }
 
 export class ExecutionUnavailable extends Error {}
@@ -155,5 +159,13 @@ export class HttpExecutionClient implements ExecutionClient {
   async discoverMcp(tenantId: string, connectorId: string) {
     return (await this.post<{ tools: Array<{ toolId: string; name: string; declaredBy: string }> }>('/internal/mcp/discover', { tenantId, connectorId }))
       .tools;
+  }
+
+  startRollback(input: { tenantId: string; runId: string; scope: 'action' | 'run'; compensationId?: string | undefined; requestedBy: string; requestedAt: string; agentId?: string | undefined }) {
+    return this.post<{ rollbackId: string; compensations: string[] }>('/internal/rollbacks', input);
+  }
+
+  refreshBlastRadius(tenantId: string, runId: string) {
+    return this.post<{ id: string; programVersion: number; summary: unknown }>('/internal/blast-radius', { tenantId, runId });
   }
 }

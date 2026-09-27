@@ -933,6 +933,9 @@ importers:
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
+      iovalkey:
+        specifier: ^0.4.0
+        version: 0.4.0
       zod:
         specifier: ^4.6.5
         version: 4.6.5

@@ -4,8 +4,7 @@ import { registerConnectorApi, type ConnectorApiDeps } from './connectors.js';
 import { registerProgramApi, type ProgramApiDeps } from './programs.js';
 import { registerRunApi, type RunApiDeps } from './executor/api.js';
 import { registerPolicyApi, type PolicyEngine } from './policy/index.js';
-import { registerRollbackApi, type ReversibilityEngine } from './reversibility/index.js';
-import type { Orchestrator } from '@vega/orchestration';
+import { registerRollbackApi } from './reversibility/index.js';
 
 /**
  * Execution plane (module1.md §5.1). Module 2 adds the connector runtime behind an internal

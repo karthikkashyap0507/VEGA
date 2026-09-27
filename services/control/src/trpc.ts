@@ -16,6 +16,7 @@ import { tenantAttributes, type Span } from '@vega/telemetry';
 import type { ConnectorDeps } from './connectors/deps.js';
 import type { AgentCoreDeps, RunCoordinator } from './agent/coordinator.js';
 import type { PolicyPublisher } from './policy/publisher.js';
+import type { ReversibilityStore } from '@vega/compensators';
 
 /**
  * Control-plane RPC.
@@ -38,6 +39,13 @@ export interface ControlDeps {
   agent?: { core: AgentCoreDeps; coordinator: RunCoordinator };
   /** Module 5: signing and distributing policy bundles. Absent: build/activate answer 503. */
   policy?: { publisher: PolicyPublisher };
+  /** Module 6: the reversibility store and the fast revoke cache (Valkey). */
+  reversibility?: { store: ReversibilityStore; cache?: FastRevokeLookup | undefined; pushSecret?: string | undefined };
+}
+
+/** The read half of the fast revoke path (execution writes it when a hold opens). */
+export interface FastRevokeLookup {
+  get(key: string): Promise<string | null>;
 }
 
 export interface Principal extends PrincipalClaims {
@@ -92,6 +100,8 @@ function codeFor(status: number): TRPCError['code'] {
       return 'CONFLICT';
     case 422:
       return 'UNPROCESSABLE_CONTENT';
+    case 428:
+      return 'PRECONDITION_FAILED';
     case 429:
       return 'TOO_MANY_REQUESTS';
     case 503:
@@ -212,6 +222,12 @@ export const signupProcedure = t.procedure.use(async ({ ctx, next }) => {
 export const webhookProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (ctx.principal?.system !== 'webhook') throw new ProblemError(problems.forbidden('webhook principal required'));
   return next({ ctx: { ...ctx, log: ctx.deps.logger.child({ system: 'webhook' }) } });
+});
+
+/** Module 6: the one-tap revoke capability (from a push), and nothing else. */
+export const holdRevokeProcedure = t.procedure.use(async ({ ctx, next }) => {
+  if (ctx.principal?.system !== 'hold_revoke') throw new ProblemError(problems.forbidden('hold revoke principal required'));
+  return next({ ctx: { ...ctx, log: ctx.deps.logger.child({ system: 'hold_revoke' }) } });
 });
 
 /** Capability gate (layer 1 of 2 — see packages/authz/src/roles.ts). */

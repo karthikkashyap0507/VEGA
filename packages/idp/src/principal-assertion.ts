@@ -42,8 +42,10 @@ export interface PrincipalClaims {
    * necessarily happens before either does. `webhook` (Module 4): an inbound agent trigger,
    * authenticated by the agent's own webhook secret, not by a session. The control plane admits
    * system principals to exactly the procedures that declare them, and nothing else.
+   * `hold_revoke` (Module 6): the one-tap revoke from a push notification — no session, only a
+   * capability that can stop exactly one held action.
    */
-  system?: 'signup' | 'webhook';
+  system?: 'signup' | 'webhook' | 'hold_revoke';
 }
 
 /** Sentinel ids for system principals. Never valid uuids, so withTenant refuses them. */
@@ -140,7 +142,7 @@ export class PrincipalAssertionVerifier {
       userId: payload.sub,
       ...(typeof payload['sid'] === 'string' ? { sessionId: payload['sid'] } : {}),
       ...(typeof payload['trc'] === 'string' ? { traceId: payload['trc'] } : {}),
-      ...(payload['sys'] === 'signup' ? { system: 'signup' as const } : payload['sys'] === 'webhook' ? { system: 'webhook' as const } : {}),
+      ...(payload['sys'] === 'signup' || payload['sys'] === 'webhook' || payload['sys'] === 'hold_revoke' ? { system: payload['sys'] as 'signup' | 'webhook' | 'hold_revoke' } : {}),
     };
   }
 }

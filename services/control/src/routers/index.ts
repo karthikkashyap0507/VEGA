@@ -14,6 +14,7 @@ import { conversationsRouter } from './conversations.js';
 import { policiesRouter } from './policies.js';
 import { riskRouter } from './risk.js';
 import { triggersRouter, webhooksRouter } from './webhooks.js';
+import { holdsRouter, reversibilityRouter, undoRouter } from './reversibility.js';
 
 export const appRouter = router({
   me: meRouter,
@@ -33,6 +34,9 @@ export const appRouter = router({
   policies: policiesRouter,
   risk: riskRouter,
   triggers: triggersRouter,
+  holds: holdsRouter,
+  undo: undoRouter,
+  reversibility: reversibilityRouter,
   signup: signupRouter,
 });
 

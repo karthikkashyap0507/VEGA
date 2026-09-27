@@ -10,6 +10,7 @@ export type ProblemType =
   | 'https://errors.vega.dev/rate-limited'
   | 'https://errors.vega.dev/tenant-context-missing'
   | 'https://errors.vega.dev/entitlement-required'
+  | 'https://errors.vega.dev/confirmation-required'
   | 'https://errors.vega.dev/validation'
   | 'https://errors.vega.dev/precondition-failed'
   | 'https://errors.vega.dev/idempotency-conflict'
@@ -85,6 +86,13 @@ export const problems = {
     type: 'https://errors.vega.dev/idempotency-conflict',
     title: 'Idempotency key reused with a different request',
     status: 422,
+    detail,
+  }),
+  /** Module 6: an undo that others will see — the caller must confirm the consequence first. */
+  confirmationRequired: (detail: string): Problem => ({
+    type: 'https://errors.vega.dev/confirmation-required',
+    title: 'Confirm the consequence first',
+    status: 428,
     detail,
   }),
   rateLimited: (retryAfterSeconds: number): Problem => ({
