@@ -9,5 +9,24 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint ."
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0",
+    "@noble/post-quantum": "^0.7.1",
+    "fflate": "^0.8.3"
+  },
+  "license": "Apache-2.0",
+  "description": "Independent, offline verification of VEGA evidence packs: RFC 8785 canonical JSON, ML-DSA-65 signatures, RFC 6962 Merkle proofs.",
+  "bin": {
+    "vega-verify": "src/cli.ts"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
   }
 }

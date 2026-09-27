@@ -14,9 +14,13 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@noble/post-quantum": "^0.7.1",
     "@vega/db": "workspace:*",
     "@vega/shared": "workspace:*",
+    "@vega/verifier": "workspace:*",
+    "esbuild": "^0.25.12",
     "fastify": "^5.12.5",
+    "fflate": "^0.8.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
