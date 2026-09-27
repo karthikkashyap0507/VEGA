@@ -147,4 +147,13 @@ test('studio → connect → chat run → clarification → inspector', async ({
   // Module 5: every step was decided and recorded, with its reason chain.
   await page.getByRole('tab', { name: /Policy/ }).click();
   await expect(page.getByTestId('run-evaluations').getByTestId('risk-explanation').first()).toBeVisible();
+
+  // ------------------------------------------------------------ a new conversation, used at once
+  // Regression: a message sent right after "New conversation" (before the list has loaded) must
+  // land in the new thread, not in whichever older thread the page selected first.
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'New conversation' }).click();
+  await page.getByLabel('Message').fill('Email Peter saying see you tomorrow');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByTestId('user-message')).toHaveText(['Email Peter saying see you tomorrow'], { timeout: 15_000 });
 });

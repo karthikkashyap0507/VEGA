@@ -57,6 +57,16 @@ describe('principal resolution', () => {
     expect(p.status).toBe(403);
   });
 
+  it('two unrelated firms with the same name can both sign up (organization names are unique in the IdP)', async () => {
+    const token = await h.issuer.mint({ tenantId: 'system', userId: 'system:signup', system: 'signup' });
+    const client = h.raw({ [PRINCIPAL_HEADER]: token });
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const first = await client.signup.provision.mutate({ email: `a-${suffix}@first.example`, company: `Acme ${suffix}` });
+    const second = await client.signup.provision.mutate({ email: `b-${suffix}@second.example`, company: `Acme ${suffix}` });
+    expect(first.tenantId).not.toBe(second.tenantId);
+    expect([...h.identity.orgs.values()].filter((o) => o.name.startsWith(`Acme ${suffix}`))).toHaveLength(2);
+  });
+
   it('a mismatched (tenant, user) pair resolves to nothing — RLS hides the user', async () => {
     const p = await problemOf(h.as(A.tenantId, B.userId).me.get.query());
     expect(p.status).toBe(401);

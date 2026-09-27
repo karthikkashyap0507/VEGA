@@ -44,7 +44,7 @@ export function RunCard({ runId }: { runId: string }) {
   };
   const emits = run.result?.emits ?? [];
   return (
-    <div className="grid gap-2 rounded-lg border border-border bg-surface-muted/40 p-3" data-testid="run-card" data-run-status={run.status}>
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-lg border border-border bg-surface-muted/40 p-3" data-testid="run-card" data-run-status={run.status}>
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <StreamingStatus connected={stream.connected} events={stream.events} status={run.status} />

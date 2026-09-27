@@ -51,12 +51,17 @@ export function Studio() {
   const [test, setTest] = useState<TestResult | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // The draft follows the saved spec; transient feedback (the save confirmation, a one-time
+  // webhook secret, a test result) belongs to the agent being edited, and survives the refetch
+  // that a save itself triggers.
   useEffect(() => {
     if (spec.data) setDraft(spec.data.spec);
+  }, [spec.data]);
+  useEffect(() => {
     setSaved(null);
     setSecret(null);
     setTest(null);
-  }, [spec.data]);
+  }, [agentId]);
 
   const byKind = useMemo(() => {
     const m = new Map<string, NonNullable<typeof tools.data>>();

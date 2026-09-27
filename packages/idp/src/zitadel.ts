@@ -253,6 +253,8 @@ export class InMemoryIdentityAdmin implements IdentityAdmin {
   }
 
   async createOrganization(name: string) {
+    // As Zitadel does: organization names are unique across the instance.
+    if ([...this.orgs.values()].some((o) => o.name === name)) throw new ZitadelError(`Organisation's name or id already taken`, 409, null);
     const orgId = this.id();
     this.orgs.set(orgId, { name });
     return { orgId };

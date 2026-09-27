@@ -57,7 +57,7 @@ export function ReasonChain({ chain, className }: { chain: ChainStep[]; classNam
   return (
     <ol className={cn('grid gap-0.5 text-xs', className)} aria-label="Reason chain">
       {chain.map((s, i) => (
-        <li key={i} className="grid grid-cols-[5.5rem_1fr] gap-2">
+        <li key={i} className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
           <span className="font-mono uppercase text-muted">{s.step}</span>
           <span>
             {s.detail}
@@ -73,7 +73,7 @@ export function RiskExplanation({ evaluation }: { evaluation: Evaluation }) {
   const r = evaluation.risk;
   const policyStep = evaluation.chain.find((s) => s.step === 'policy' && s.id === evaluation.decidedBy.key);
   return (
-    <section className="grid gap-2 rounded-md border border-border bg-surface-muted/60 p-2" aria-label="Risk explanation" data-testid="risk-explanation">
+    <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 overflow-x-auto rounded-md border border-border bg-surface-muted/60 p-2" aria-label="Risk explanation" data-testid="risk-explanation">
       <header className="flex flex-wrap items-center gap-2 text-sm">
         {r ? (
           <>

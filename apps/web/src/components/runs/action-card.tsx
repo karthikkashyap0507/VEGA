@@ -72,7 +72,7 @@ export function ActionCard({ action, onDecide, busy, className, runId }: ActionC
   const leaves = action.argTaints ?? [];
   const external = action.effect?.externalRecipients ?? [];
   return (
-    <article className={cn('grid gap-3 rounded-lg border border-border bg-surface p-3', className)} aria-label={`Action: ${action.toolId ?? 'step'}`} data-testid="action-card">
+    <article className={cn('grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 rounded-lg border border-border bg-surface p-3', className)} aria-label={`Action: ${action.toolId ?? 'step'}`} data-testid="action-card">
       <header className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-semibold">{action.toolId}</code>
         {action.reversibility ? <ReversibilityBadge value={action.reversibility as Reversibility} /> : null}

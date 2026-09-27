@@ -49,7 +49,11 @@ export function StreamingStatus({ connected, events, status }: { connected: bool
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-muted" aria-live="polite">
       <RunStatusBadge status={status} />
-      {text ? <span className="truncate">{text}</span> : null}
+      {text ? (
+        <span className="min-w-0 flex-1 truncate" title={text}>
+          {text}
+        </span>
+      ) : null}
       <span className={cn('ml-auto inline-flex items-center gap-1', connected ? 'text-success' : 'text-muted')} title={connected ? 'Live' : 'Not streaming'}>
         <span className={cn('size-1.5 rounded-full', connected ? 'bg-success' : 'bg-border')} />
         {connected ? 'live' : 'idle'}

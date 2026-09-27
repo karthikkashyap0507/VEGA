@@ -29,23 +29,41 @@ export function ChatSurface() {
   const [sending, setSending] = useState(false);
   const thread = useThread(current);
   const bottom = useRef<HTMLDivElement>(null);
+  // A conversation being created. While it is, nothing may auto-select another thread, and a
+  // message sent meanwhile waits for it — otherwise it lands in whichever thread loaded first.
+  const creating = useRef<Promise<string | undefined> | null>(null);
+  const chosen = useRef(false);
 
   useEffect(() => {
     if (!agentId && active[0]) setAgentId(active[0].id);
   }, [active, agentId]);
   useEffect(() => {
-    if (!current && threads.data?.[0]) setCurrent(threads.data[0].id);
+    if (!current && !chosen.current && threads.data?.[0]) setCurrent(threads.data[0].id);
   }, [threads.data, current]);
   useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [thread.data?.messages.length]);
 
   const agentName = (id: string) => agents.data?.find((a) => a.id === id)?.name ?? 'agent';
 
-  async function newThread(): Promise<string | undefined> {
-    if (!agentId) return undefined;
-    const c = await api.post<Conversation>('/v1/conversations', { agentId });
-    await qc.invalidateQueries({ queryKey: runKeys.conversations });
-    setCurrent(c.id);
-    return c.id;
+  function newThread(): Promise<string | undefined> {
+    if (!agentId) return Promise.resolve(undefined);
+    chosen.current = true;
+    const p = (async () => {
+      try {
+        const c = await api.post<Conversation>('/v1/conversations', { agentId });
+        setCurrent(c.id);
+        await qc.invalidateQueries({ queryKey: runKeys.conversations });
+        return c.id;
+      } finally {
+        creating.current = null;
+      }
+    })();
+    creating.current = p;
+    return p;
+  }
+
+  function select(id: string) {
+    chosen.current = true;
+    setCurrent(id);
   }
 
   async function send() {
@@ -54,7 +72,7 @@ export function ChatSurface() {
     setSending(true);
     setError(null);
     try {
-      const id = current ?? (await newThread());
+      const id = creating.current ? await creating.current : (current ?? (await newThread()));
       if (!id) return;
       await api.post(`/v1/conversations/${id}/messages`, { text: body });
       setText('');
@@ -83,8 +101,8 @@ export function ChatSurface() {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-[16rem_1fr]">
-      <aside className="grid content-start gap-2" aria-label="Conversations">
+    <div className="grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
+      <aside className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2" aria-label="Conversations">
         <label className="grid gap-1 text-xs">
           <span className="text-muted">Agent</span>
           <select className="h-8 rounded-md border border-border bg-surface px-2 text-sm" value={agentId} onChange={(e) => setAgentId(e.target.value)} aria-label="Agent">
@@ -103,7 +121,7 @@ export function ChatSurface() {
             <li key={c.id}>
               <button
                 type="button"
-                onClick={() => setCurrent(c.id)}
+                onClick={() => select(c.id)}
                 className={cn('w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-muted', current === c.id && 'bg-surface-muted font-medium')}
                 title={c.title}
               >
@@ -114,8 +132,8 @@ export function ChatSurface() {
           ))}
         </ul>
       </aside>
-      <section className="grid min-h-[28rem] grid-rows-[1fr_auto] gap-3 rounded-lg border border-border bg-surface p-3" aria-label="Conversation">
-        <div className="grid content-start gap-3 overflow-y-auto" data-testid="thread">
+      <section className="grid min-h-[28rem] min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[1fr_auto] gap-3 rounded-lg border border-border bg-surface p-3" aria-label="Conversation">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-3 overflow-y-auto" data-testid="thread">
           {!thread.data?.messages.length ? (
             <p className="text-sm text-muted">
               Ask for something in plain language — “Email Peter saying the numbers are attached”, “Schedule a meeting with Sam on 2026-10-05 at 14:00”. Mention{' '}

@@ -64,8 +64,11 @@ export async function provisionTenant(
   const displayName = input.owner.displayName ?? email.split('@')[0] ?? email;
   const [givenName, ...rest] = displayName.split(/\s+/);
 
-  const { orgId } = await deps.identity.createOrganization(input.tenantName);
   const tenantId = randomUUID();
+  // The identity provider's organization is an internal handle, and its names are unique across
+  // the whole instance: two unrelated firms may well share a name. The tenant keeps the name as
+  // entered; the organization gets it plus the tenant's id.
+  const { orgId } = await deps.identity.createOrganization(`${input.tenantName} · ${tenantId.slice(0, 8)}`);
   let ownerIdpSubject: string | undefined;
   let wroteTuples: TupleKey[] = [];
   let rowsWritten = false;
