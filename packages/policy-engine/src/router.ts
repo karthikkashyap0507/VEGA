@@ -8,12 +8,13 @@
  *   1. anything carrying UNTRUSTED content → the quarantined extraction model only (M3 §7.5)
  *   2. HIGH/CRITICAL risk → the highest-accuracy model for the purpose, whatever it costs
  *   3. residency-constrained tenants → approved regions/providers only
- *   4. self-serve plans → Sonnet/Haiku-class planning
+ *   4. plans below Teams (free, pro, business) → Sonnet/Haiku-class planning
  *   and a budget breach degrades or queues — it never bills a surprise, never silently upgrades.
  */
 
 export type Purpose = 'planner' | 'intent' | 'extractor';
-export type Plan = 'individual' | 'smb' | 'teams' | 'business' | 'enterprise';
+/** The plans of `plan_entitlements` (module1.md, migration 0003). */
+export type Plan = 'free' | 'pro' | 'business' | 'teams' | 'enterprise';
 
 export interface ModelChoice {
   model: string;
@@ -52,7 +53,8 @@ export interface RouteInput {
 
 export class RoutingRefused extends Error {}
 
-const SELF_SERVE: ReadonlySet<Plan> = new Set(['individual', 'smb']);
+/** "Existential below Teams" (§5.6): every plan below Teams plans with the economy class. */
+const SELF_SERVE: ReadonlySet<Plan> = new Set(['free', 'pro', 'business']);
 
 export function routeModel(input: RouteInput, catalog: RouterCatalog = DEFAULT_CATALOG): ModelChoice {
   const reasons: string[] = [];

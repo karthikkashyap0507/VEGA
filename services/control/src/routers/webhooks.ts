@@ -21,7 +21,20 @@ import { refusal } from './runs.js';
  * run's objective is the agent's own template (§5.1 rule 1).
  */
 
-export const WEBHOOK_EVENT_KINDS = ['run.created', 'run.started', 'run.completed', 'run.failed', 'run.awaiting_input', 'run.replanned', 'run.needs_attention', 'run.status'] as const;
+export const WEBHOOK_EVENT_KINDS = [
+  'run.created',
+  'run.started',
+  'run.completed',
+  'run.failed',
+  'run.awaiting_input',
+  'run.replanned',
+  'run.needs_attention',
+  'run.status',
+  // Module 5 (docs/module5.md §7)
+  'policy.activated',
+  'policy.denied_action',
+  'risk.critical',
+] as const;
 
 const endpointView = (e: typeof schema.webhookEndpoints.$inferSelect) => ({
   id: e.id,

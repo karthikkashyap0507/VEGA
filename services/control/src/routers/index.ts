@@ -11,6 +11,8 @@ import { usersRouter } from './users.js';
 import { workspacesRouter } from './workspaces.js';
 import { runsRouter } from './runs.js';
 import { conversationsRouter } from './conversations.js';
+import { policiesRouter } from './policies.js';
+import { riskRouter } from './risk.js';
 import { triggersRouter, webhooksRouter } from './webhooks.js';
 
 export const appRouter = router({
@@ -28,6 +30,8 @@ export const appRouter = router({
   runs: runsRouter,
   conversations: conversationsRouter,
   webhooks: webhooksRouter,
+  policies: policiesRouter,
+  risk: riskRouter,
   triggers: triggersRouter,
   signup: signupRouter,
 });

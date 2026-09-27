@@ -17,6 +17,12 @@ env:
   EVIDENCE_DATABASE_URL: postgresql://vega_evi:vega_evi_local_dev_only@localhost:5433/vega_evidence
   EVIDENCE_WRITER_URL: postgresql://vega_evi_writer:vega_evi_writer_local@localhost:5433/vega_evidence
   OPENFGA_API_URL: http://localhost:8081
+  # Module 5: a plain OPA server for the policy suites, Presidio, and SeaweedFS (S3).
+  OPA_TEST_URL: http://localhost:8182
+  PRESIDIO_TEST_URL: http://localhost:5002
+  S3_ENDPOINT: http://127.0.0.1:8333
+  S3_ACCESS_KEY_ID: vega_local
+  S3_SECRET_ACCESS_KEY: vega_local_dev_only
 
 # -----------------------------------------------------------------------------
 # Gate order mirrors docs/module1.md §11 and docs/TECHSTACK.md §21:
@@ -47,7 +53,7 @@ jobs:
         run: pnpm vitest run packages/eslint-rules
 
   test:
-    name: Unit + integration (Postgres x2, OpenFGA, Valkey)
+    name: Unit + integration (Postgres x2, OpenFGA, Valkey, OPA, Presidio, SeaweedFS)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -77,6 +83,17 @@ jobs:
           psql "$EVIDENCE_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/docker/initdb/evidence/01-roles.sql
       - name: Wait for OpenFGA
         run: for i in $(seq 1 30); do curl -sf localhost:8081/healthz && break; sleep 1; done
+      - name: Module 5 services — OPA (test server), Presidio (pinned), SeaweedFS (S3)
+        run: |
+          docker run -d --name opa-test -p 8182:8181 mirror.gcr.io/openpolicyagent/opa:1.10.1-static run --server --addr 0.0.0.0:8181
+          docker run -d --name presidio -p 5002:3000 mcr.microsoft.com/presidio-analyzer:2.2.362
+          docker run -d --name seaweedfs -p 8333:8333 -e WEED_MASTER_VOLUME_GROWTH_COPY_1=1 -v "$PWD/infra/docker/seaweedfs:/etc/seaweedfs:ro" \
+            chrislusf/seaweedfs:3.97 server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -volume.max=100 -master.volumeSizeLimitMB=64
+      - name: Wait for OPA, Presidio and SeaweedFS
+        run: |
+          for i in $(seq 1 30); do curl -sf localhost:8182/health && break; sleep 1; done
+          for i in $(seq 1 120); do curl -sf localhost:5002/health && break; sleep 2; done
+          for i in $(seq 1 60); do curl -s -o /dev/null localhost:8333/ && break; sleep 2; done
       - run: pnpm test
 
   tenant-isolation:
@@ -265,6 +282,51 @@ jobs:
         run: npx vitest run services/control/test/runs.test.ts evals/taint-soundness/test/ambiguity.test.ts
       - name: C1 entity resolution (≥ 95%) and C2 program validity (≥ 90% first attempt)
         run: npx vitest run evals/intent
+
+  policy-engine:
+    name: 'Policy engine — fail closed, most restrictive wins, Rego ≡ reference, simulation (BLOCKING, module5.md §11)'
+    runs-on: ubuntu-latest
+    needs: [quality]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: OpenFGA (service containers cannot pass `run`)
+        run: docker run -d --name openfga -p 8081:8080 openfga/openfga:v1.21.0 run
+      - name: Database roles and schema
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/docker/initdb/primary/01-roles.sql
+          pnpm db:migrate
+      - name: Module 5 services — OPA (test server), Presidio (pinned), SeaweedFS (S3)
+        run: |
+          docker run -d --name opa-test -p 8182:8181 mirror.gcr.io/openpolicyagent/opa:1.10.1-static run --server --addr 0.0.0.0:8181
+          docker run -d --name presidio -p 5002:3000 mcr.microsoft.com/presidio-analyzer:2.2.362
+          docker run -d --name seaweedfs -p 8333:8333 -e WEED_MASTER_VOLUME_GROWTH_COPY_1=1 -v "$PWD/infra/docker/seaweedfs:/etc/seaweedfs:ro" \
+            chrislusf/seaweedfs:3.97 server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -volume.max=100 -master.volumeSizeLimitMB=64
+      - name: Wait for OPA, Presidio and SeaweedFS
+        run: |
+          for i in $(seq 1 30); do curl -sf localhost:8182/health && break; sleep 1; done
+          for i in $(seq 1 120); do curl -sf localhost:5002/health && break; sleep 2; done
+          for i in $(seq 1 60); do curl -s -o /dev/null localhost:8333/ && break; sleep 2; done
+      - name: Wait for OpenFGA
+        run: for i in $(seq 1 30); do curl -sf localhost:8081/healthz && break; sleep 1; done
+      - name: Compiler golden files, Rego unit tests, most-restrictive-wins (property), Rego ≡ reference evaluator (differential), signed bundles
+        env: { DIFF_RUNS: '500' }
+        run: npx vitest run packages/policy-engine/test/engine.test.ts packages/risk
+      - name: Presidio recall on the professional-services corpus (≥ 95%)
+        run: npx vitest run packages/policy-engine/test/classify.test.ts
+      - name: The executor under policy — holds, dual approval, fail closed (OPA killed mid-run), reproducible risk, p99 < 50 ms
+        run: npx vitest run services/execution/test/policy.test.ts
+      - name: Authoring, simulation over 90 days, activation gate, signed distribution through object storage (OPA discovery), tamper refusal
+        run: npx vitest run services/control/test/policies.test.ts
 
   compensator-correctness:
     name: 'Compensator correctness — BLOCKING (enable in M6)'

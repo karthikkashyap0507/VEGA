@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "vega",
+      "credentials": [{ "accessKey": "vega_local", "secretKey": "vega_local_dev_only" }],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}

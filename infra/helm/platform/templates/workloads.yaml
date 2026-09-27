@@ -20,13 +20,16 @@
                     (dict "name" "WEB_FETCH_URL" "value" (printf "%s://web-fetch.%s.svc:3005" $scheme (include "ns.execution" .)))
                     (dict "name" "MODEL_PLANNER" "value" .Values.models.planner)
                     (dict "name" "MODEL_ROUTINE" "value" .Values.models.routine)
-                    (dict "name" "LITELLM_BASE_URL" "value" .Values.models.gatewayUrl)))
+                    (dict "name" "LITELLM_BASE_URL" "value" .Values.models.gatewayUrl)
+                    (dict "name" "S3_BUCKET_POLICY" "value" .Values.policy.bucket)))
   (dict "name" "execution" "plane" "execution" "port" 3003 "image" .Values.image.service "secret" .Values.secrets.execution "internal" true
         "env" (list (dict "name" "SERVICE" "value" "execution")
                     (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)
                     (dict "name" "EVIDENCE_URL" "value" (printf "%s://evidence.%s.svc:3004" $scheme (include "ns.evidence" .)))
                     (dict "name" "WEB_FETCH_URL" "value" (printf "%s://web-fetch.%s.svc:3005" $scheme (include "ns.execution" .)))
-                    (dict "name" "EXTRACTOR_URL" "value" (printf "%s://extractor.%s.svc:3006" $scheme (include "ns.execution" .)))))
+                    (dict "name" "EXTRACTOR_URL" "value" (printf "%s://extractor.%s.svc:3006" $scheme (include "ns.execution" .)))
+                    (dict "name" "OPA_URL" "value" (printf "http://opa.%s.svc:8181" (include "ns.execution" .)))
+                    (dict "name" "PRESIDIO_ANALYZER_URL" "value" (printf "http://presidio.%s.svc:3000" (include "ns.execution" .)))))
   (dict "name" "extractor" "plane" "execution" "port" 3006 "image" .Values.image.service "secret" .Values.secrets.extractor "internal" true
         "env" (list (dict "name" "SERVICE" "value" "extractor")
                     (dict "name" "MODEL_EXTRACTOR" "value" .Values.models.extractor)

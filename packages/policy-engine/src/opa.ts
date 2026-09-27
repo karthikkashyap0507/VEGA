@@ -61,14 +61,23 @@ export class OpaClient {
     return { matches: (body.result as Match[]).sort((a, b) => a.id.localeCompare(b.id)), bundles };
   }
 
-  /** Readiness: OPA up AND every configured bundle activated. */
+  /**
+   * Liveness: OPA answers. Deliberately NOT `?bundles=true`: that would make one tenant's
+   * missing bundle take the whole evaluator out of service. Per-tenant correctness is the
+   * `require` check on every query (an activated bundle OPA has not loaded fails closed).
+   */
   async healthy(): Promise<boolean> {
     try {
-      const res = await this.call('/health?bundles=true', { method: 'GET' });
+      const res = await this.call('/health', { method: 'GET' });
       return res.status === 200;
     } catch {
       return false;
     }
+  }
+
+  /** Readiness for decisions: OPA answers AND the presets bundle (every tenant's baseline) is loaded. */
+  async ready(presetsBundle = 'presets'): Promise<boolean> {
+    return Boolean((await this.bundleRevisions().catch(() => ({}) as Record<string, string>))[presetsBundle]);
   }
 
   /** Revision of each loaded bundle (the `.manifest` revision we set: `<scope>@v<version>`). */

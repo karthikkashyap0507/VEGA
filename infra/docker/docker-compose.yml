@@ -159,6 +159,51 @@ services:
       - '8082:3000' # playground
       - '8083:8081' # gRPC
 
+  # ------------------------------------------------ Object storage (Module 5+)
+  # SeaweedFS S3 (TECHSTACK §11.3). Module 5 distributes signed policy bundles through it;
+  # Modules 6/7 add content-addressed blobs and evidence. Deployed WORM uses cloud S3 Object Lock.
+  # One volume per new collection (bucket): the default of seven exhausts a laptop-sized store.
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.97
+    restart: unless-stopped
+    command: ['server', '-dir=/data', '-s3', '-s3.port=8333', '-s3.config=/etc/seaweedfs/s3.json', '-volume.max=100', '-master.volumeSizeLimitMB=64']
+    environment:
+      WEED_MASTER_VOLUME_GROWTH_COPY_1: '1'
+    volumes:
+      - ./seaweedfs:/etc/seaweedfs:ro
+      - seaweedfs-data:/data
+    ports:
+      - '8333:8333' # S3 API
+
+  # ------------------------------------------------------ OPA (Module 5, C3)
+  # The policy evaluator. It loads ONLY signed bundles: a signed discovery bundle (from object
+  # storage) names the presets bundle and every tenant's bundle. Its configuration — which embeds
+  # the verification key — is written by the control plane on first start (or `pnpm policy:setup`)
+  # into ./secrets; until then this container restarts, and every action is DENIED (fail closed).
+  opa:
+    image: openpolicyagent/opa:1.10.1-static
+    restart: unless-stopped
+    command: ['run', '--server', '--addr', '0.0.0.0:8181', '--config-file', '/secrets/opa-config.yaml']
+    environment:
+      AWS_ACCESS_KEY_ID: vega_local
+      AWS_SECRET_ACCESS_KEY: vega_local_dev_only
+      AWS_REGION: us-east-1
+    volumes:
+      - ./secrets:/secrets:ro
+    depends_on:
+      - seaweedfs
+    ports:
+      - '8181:8181'
+
+  # ------------------------------------------------- Presidio (Module 5, §5.3)
+  # PII/PHI detection: the one place Python earns its place in the serving path. Pinned: the
+  # recall gate (≥ 95% on the professional-services corpus) was measured on this version.
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer:2.2.362
+    restart: unless-stopped
+    ports:
+      - '5002:3000'
+
   # -------------------------------------------------------- OTel + SigNoz(lite)
   # Full SigNoz is heavy for a laptop. Jaeger gives trace correlation in dev;
   # SigNoz/ClickHouse arrives with the deployed environment.
@@ -173,6 +218,7 @@ services:
       - '4318:4318' # OTLP HTTP
 
 volumes:
+  seaweedfs-data:
   postgres-data:
   postgres-evidence-data:
   postgres-zitadel-data:

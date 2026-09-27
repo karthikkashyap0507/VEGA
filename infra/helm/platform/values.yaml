@@ -47,7 +47,7 @@ mtls:
 # Each lives ONLY in its own plane's namespace. There is deliberately no key for the evidence
 # database anywhere under `execution`.
 secrets:
-  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*, EXECUTION_INTERNAL_TOKEN, CONNECTOR_STATE_SECRET, *_CLIENT_ID/SECRET, RUN_TOKEN_KEY_PEM (M4: signs run tokens), ANTHROPIC_API_KEY | LITELLM_MASTER_KEY (M4: planner)
+  control: control-secrets       # DATABASE_URL, DATABASE_APP_URL, SESSION_SECRET, LOCAL_KEK_BASE64|KMS_*, OPENFGA_*, ZITADEL_*, EXECUTION_INTERNAL_TOKEN, CONNECTOR_STATE_SECRET, *_CLIENT_ID/SECRET, RUN_TOKEN_KEY_PEM (M4: signs run tokens), ANTHROPIC_API_KEY | LITELLM_MASTER_KEY (M4: planner), OPA_BUNDLE_SIGNING_KEY + S3_ENDPOINT/S3_REGION/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY (M5: signs and writes policy bundles)
   execution: execution-secrets   # EVIDENCE_APPEND_TOKEN, DATABASE_APP_URL, EXECUTION_INTERNAL_TOKEN, LOCAL_KEK_BASE64|KMS_*, VALKEY_URL, *_CLIENT_ID/SECRET, DBOS_SYSTEM_DATABASE_URL (M4: the executor's own database), RUN_TOKEN_JWKS (M4: public keys only)
   # web-fetch gets NO Secret at all (module2.md §10.3).
   evidence: evidence-secrets     # EVIDENCE_DATABASE_URL, EVIDENCE_WRITER_URL, EVIDENCE_APPEND_TOKEN
@@ -83,6 +83,7 @@ network:
       - login.microsoftonline.com
       - slack.com
     mcpServers: []        # execution: CIDRs of attached MCP servers
+    objectStorage: []     # control (writes bundles) + OPA (reads them), port 443 — Module 5
     # The quarantined extractor's ONLY egress: the model endpoint, by name.
     modelGateway: [api.anthropic.com]
   # The isolated web fetcher's egress: everything public on 80/443, minus these ranges.
@@ -101,6 +102,29 @@ network:
       - 240.0.0.0/4
     ipv6: false
     deniedRangesV6: ["::1/128", "fc00::/7", "fe80::/10", "::ffff:0:0/96", "64:ff9b::/96"]
+
+# Module 5 — the policy engine's execution-side services (docs/module5.md §3, §9, §10).
+policy:
+  # Off only in the kind policy-test profile: without OPA every action is DENIED (fail closed).
+  enabled: true
+  # Where signed bundles live (object storage). Control writes; OPA reads (read-only role).
+  bucket: vega-policy
+  opa:
+    image: { repository: openpolicyagent/opa, tag: 1.10.1-static, pullPolicy: IfNotPresent }
+    replicas: 2
+    # The ES256 PUBLIC key every bundle is verified with (the private half is control's
+    # OPA_BUNDLE_SIGNING_KEY). A bundle whose signature does not verify is never loaded.
+    bundleVerificationKey: ""
+    # The bucket as OPA reaches it, path-style (e.g. https://s3.eu-west-1.amazonaws.com/vega-policy).
+    storeUrl: ""
+    # A Secret with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION of a READ-ONLY
+    # role scoped to the policy bucket (SigV4-signed fetches).
+    storeSecret: opa-store-readonly
+    polling: { min: 10, max: 30 }
+  presidio:
+    # Pinned: the ≥95% recall gate was measured on this version (packages/policy-engine test corpus).
+    image: { repository: mcr.microsoft.com/presidio-analyzer, tag: 2.2.362, pullPolicy: IfNotPresent }
+    replicas: 1
 
 # In-cluster Postgres x2, OpenFGA and Valkey — for kind/k3s policy tests and local clusters
 # ONLY. Deployed environments use managed databases reached through `network.egress`.

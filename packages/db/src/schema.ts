@@ -549,7 +549,7 @@ export const policyBundles = pgTable('policy_bundles', {
 });
 
 export const riskWeights = pgTable('risk_weights', {
-  version: integer('version').primaryKey(),
+  version: integer('version').primaryKey().default(sql`nextval('risk_weights_version_seq')`),
   tenantId: uuid('tenant_id'),
   weights: jsonb('weights').notNull(),
   boundaries: jsonb('boundaries').notNull(),

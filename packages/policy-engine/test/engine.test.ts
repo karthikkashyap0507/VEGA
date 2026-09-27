@@ -352,13 +352,15 @@ describe('the model router (C4)', () => {
     expect(() => routeModel({ purpose: 'planner', plan: 'enterprise', untrusted: true })).toThrow(RoutingRefused);
   });
   it('HIGH/CRITICAL risk overrides plan economics; self-serve plans plan economically otherwise', () => {
-    expect(routeModel({ purpose: 'planner', plan: 'smb', untrusted: false, riskTier: 'HIGH' }).model).toBe('claude-opus-5');
-    expect(routeModel({ purpose: 'planner', plan: 'smb', untrusted: false }).model).toBe('claude-sonnet-5');
-    expect(routeModel({ purpose: 'planner', plan: 'business', untrusted: false }).model).toBe('claude-opus-5');
+    expect(routeModel({ purpose: 'planner', plan: 'pro', untrusted: false, riskTier: 'HIGH' }).model).toBe('claude-opus-5');
+    expect(routeModel({ purpose: 'planner', plan: 'pro', untrusted: false }).model).toBe('claude-sonnet-5');
+    // "Existential below Teams": business plans economically too; Teams and up get the best model.
+    expect(routeModel({ purpose: 'planner', plan: 'business', untrusted: false }).model).toBe('claude-sonnet-5');
+    expect(routeModel({ purpose: 'planner', plan: 'teams', untrusted: false }).model).toBe('claude-opus-5');
   });
   it('residency is enforced; a budget breach queues instead of spending', () => {
     expect(routeModel({ purpose: 'intent', plan: 'business', untrusted: false, residency: 'eu' }).region).toBe('eu');
     expect(() => routeModel({ purpose: 'intent', plan: 'business', untrusted: false, residency: 'cn' })).toThrow(RoutingRefused);
-    expect(routeModel({ purpose: 'planner', plan: 'smb', untrusted: false, budget: { spentCents: 3000, limitCents: 3000 } })).toMatchObject({ queue: true, model: 'claude-sonnet-5' });
+    expect(routeModel({ purpose: 'planner', plan: 'pro', untrusted: false, budget: { spentCents: 3000, limitCents: 3000 } })).toMatchObject({ queue: true, model: 'claude-sonnet-5' });
   });
 });

@@ -1,0 +1,127 @@
+{{- /*
+  Module 5 — the policy engine's execution-side services (docs/module5.md §3, §9, §10).
+
+    opa       the evaluator. Loads ONLY signed bundles: one signed discovery bundle (object
+              storage) names the presets bundle and every tenant's bundle; each is verified with
+              the ES256 public key below before it is loaded. Reached only by the execution pod.
+    presidio  PII/PHI detection. Reached only by the execution pod; it reaches nothing.
+
+  Both sit in the execution namespace: the policy decision is made where the action is taken,
+  and the execution plane never calls the control plane (docs/module5-implementation.md §2).
+*/ -}}
+{{- if .Values.policy.enabled }}
+{{- $xe := include "ns.execution" . -}}
+{{- $p := .Values.policy -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-config
+  namespace: {{ $xe }}
+  labels: {{- include "labels" (dict "root" $ "name" "opa" "plane" "execution") | nindent 4 }}
+data:
+  opa.yaml: |
+    services:
+      store:
+        url: {{ required "policy.opa.storeUrl is required" $p.opa.storeUrl | quote }}
+        credentials:
+          s3_signing:
+            environment_credentials: {}
+    keys:
+      vega:
+        algorithm: ES256
+        key: |
+          {{- required "policy.opa.bundleVerificationKey is required" $p.opa.bundleVerificationKey | nindent 10 }}
+    discovery:
+      resource: discovery.tar.gz
+      service: store
+      decision: discovery/config
+      signing:
+        keyid: vega
+      polling:
+        min_delay_seconds: {{ $p.opa.polling.min }}
+        max_delay_seconds: {{ $p.opa.polling.max }}
+    decision_logs:
+      console: false
+{{- range $svc := list (dict "name" "opa" "port" 8181 "image" $p.opa.image "replicas" $p.opa.replicas) (dict "name" "presidio" "port" 3000 "image" $p.presidio.image "replicas" $p.presidio.replicas) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $svc.name }}
+  namespace: {{ $xe }}
+  labels: {{- include "labels" (dict "root" $ "name" $svc.name "plane" "execution") | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc.name }}
+  namespace: {{ $xe }}
+  labels: {{- include "labels" (dict "root" $ "name" $svc.name "plane" "execution") | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/name: {{ $svc.name }} }
+  ports:
+    - { name: http, port: {{ $svc.port }}, targetPort: {{ $svc.port }} }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $svc.name }}
+  namespace: {{ $xe }}
+  labels: {{- include "labels" (dict "root" $ "name" $svc.name "plane" "execution") | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: {{ $svc.name }} }
+  template:
+    metadata:
+      labels: {{- include "labels" (dict "root" $ "name" $svc.name "plane" "execution") | nindent 8 }}
+      {{- if eq $svc.name "opa" }}
+      annotations:
+        checksum/config: {{ printf "%s%s" $p.opa.storeUrl $p.opa.bundleVerificationKey | sha256sum }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $svc.name }}
+      {{- include "podSecurity" $ | nindent 6 }}
+      containers:
+        - name: {{ $svc.name }}
+          image: "{{ $svc.image.repository }}:{{ $svc.image.tag }}"
+          imagePullPolicy: {{ $svc.image.pullPolicy }}
+          {{- include "containerSecurity" $ | nindent 10 }}
+          ports: [{ containerPort: {{ $svc.port }} }]
+          {{- if eq $svc.name "opa" }}
+          args: ["run", "--server", "--addr", "0.0.0.0:8181", "--config-file", "/config/opa.yaml"]
+          envFrom:
+            - secretRef: { name: {{ $p.opa.storeSecret }} }
+          volumeMounts:
+            - { name: config, mountPath: /config, readOnly: true }
+          # Liveness only: `?bundles=true` would take the evaluator down for one tenant's missing
+          # bundle. Readiness waits for the presets (every tenant's baseline) to load.
+          readinessProbe:
+            httpGet: { path: /v1/data/system/bundles/presets/manifest/revision, port: 8181 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 8181 }
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          {{- else }}
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 250m, memory: 1Gi }
+            limits: { memory: 3Gi }
+          {{- end }}
+      {{- if eq $svc.name "opa" }}
+      volumes:
+        - name: config
+          configMap: { name: opa-config }
+      {{- end }}
+{{- end }}
+{{- end }}

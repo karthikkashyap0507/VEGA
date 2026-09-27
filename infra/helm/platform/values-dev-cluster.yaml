@@ -3,6 +3,10 @@
 environment: development
 devDependencies:
   enabled: true
+# The plane-separation suites test the network, not decisions: no OPA/Presidio here, so any
+# action would be DENIED (the engine fails closed). Module 5's suites run them for real in CI.
+policy:
+  enabled: false
 network:
   ingressFrom:
     namespace: kube-system

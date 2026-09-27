@@ -29,6 +29,8 @@ export interface PlanningDeps {
   source: 'planner' | 'dev_planner';
   /** USD per million tokens, for the run's cost ledger. */
   pricePerMTok?: { input: number; output: number };
+  /** C4 (Module 5): chooses the planner model per tenant (plan, residency, budget). */
+  route?: ((run: { tenantId: string }) => Promise<{ model: string; queue?: boolean; reasons: string[] }>) | undefined;
 }
 
 export type PlanOutcome =
@@ -102,6 +104,17 @@ export async function planRun(
   } else {
     source = deps.source;
     modelId = deps.model;
+    if (deps.route) {
+      let choice: { model: string; queue?: boolean; reasons: string[] };
+      try {
+        choice = await deps.route({ tenantId: run.tenantId });
+      } catch (e) {
+        return { ok: false, reason: `no model may plan this run: ${e instanceof Error ? e.message : String(e)}`, attempts: [], costCents };
+      }
+      if (choice.queue) return { ok: false, reason: 'the monthly model budget is spent: raise it or wait for the next period (no surprise bills, no silent upgrades)', attempts: [], costCents };
+      modelId = choice.model;
+    }
+    const model = modelId;
     const [tools, catalog] = await Promise.all([deps.execution.toolDeclarations(run.tenantId, spec.allowedTools), deps.execution.programCatalog()]);
     const plannerTools: PlannerTool[] = tools.map((t) => ({
       toolId: t.toolId,
@@ -131,7 +144,7 @@ export async function planRun(
       ...(opts.feedback?.length ? { feedback: opts.feedback.slice(0, 50) } : {}),
     };
     try {
-      const r = await plan(input, { llm: deps.llm, model: deps.model, validate: check });
+      const r = await plan(input, { llm: deps.llm, model, validate: check });
       program = r.program;
       attempts = r.attempts;
       modelId = r.model;

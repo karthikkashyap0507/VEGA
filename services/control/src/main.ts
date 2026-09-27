@@ -4,10 +4,14 @@ import { PgTokenVault, sandboxFetch } from '@vega/connector-sdk';
 import { safePost } from '@vega/connector-web';
 import { AnthropicClient } from '@vega/llm';
 import { DevPlannerModel } from '@vega/planner';
+import { s3FromEnv } from '@vega/objectstore';
+import { DEFAULT_CATALOG } from '@vega/policy-engine';
 import { RunStore } from '@vega/runs';
 import { RunCoordinator, type WebhookDeliverer } from './agent/coordinator.js';
 import { heuristicMentions, llmMentions } from './agent/intent.js';
 import { loadRunTokenIssuer } from './agent/tokens.js';
+import { plannerRoute } from './agent/routing.js';
+import { loadBundleKey, PolicyPublisher } from './policy/publisher.js';
 import { PgMcpToolStore } from '@vega/connector-mcp';
 import { launchRegistry, oauthClientsFromEnv } from '@vega/connectors';
 import { HttpExecutionClient } from './connectors/deps.js';
@@ -126,7 +130,18 @@ if (connectors) {
     webhooks,
     mentions: llm ? llmMentions(llm, env['MODEL_ROUTINE'] ?? 'claude-sonnet-5') : heuristicMentions,
     planning: llm
-      ? { execution: connectors.execution, llm, model: env['MODEL_PLANNER'] ?? 'claude-opus-5', source: 'planner' as const }
+      ? {
+          execution: connectors.execution,
+          llm,
+          model: env['MODEL_PLANNER'] ?? DEFAULT_CATALOG.best.planner,
+          source: 'planner' as const,
+          // C4 (Module 5): the tenant's plan, residency and budget choose the planner model.
+          route: plannerRoute({
+            ...DEFAULT_CATALOG,
+            best: { ...DEFAULT_CATALOG.best, planner: env['MODEL_PLANNER'] ?? DEFAULT_CATALOG.best.planner },
+            economy: { ...DEFAULT_CATALOG.economy, planner: env['MODEL_PLANNER_ECONOMY'] ?? DEFAULT_CATALOG.economy.planner },
+          }),
+        }
       : { execution: connectors.execution, llm: new DevPlannerModel(), model: 'dev-planner', source: 'dev_planner' as const },
   };
   const coordinator = new RunCoordinator(core);
@@ -134,8 +149,21 @@ if (connectors) {
   agent = { core, coordinator };
 }
 
+// ---------------------------------------------------------------- policy distribution (Module 5)
+// Compile → sign (ES256) → object storage; OPA polls it through a signed discovery bundle.
+let policy: { publisher: PolicyPublisher } | undefined;
+try {
+  const key = loadBundleKey({ pem: env['OPA_BUNDLE_SIGNING_KEY'], path: env['OPA_BUNDLE_SIGNING_KEY_PATH'] ?? './infra/docker/secrets/opa-bundle-key.pem', production, log: logger, ...(env['OPA_STORE_URL'] ? { storeUrl: env['OPA_STORE_URL'] } : {}) });
+  const publisher = new PolicyPublisher(s3FromEnv(env, env['S3_BUCKET_POLICY'] ?? 'vega-policy'), key, logger, production ? { min: 10, max: 30 } : { min: 2, max: 5 });
+  await publisher.publishBaseline();
+  policy = { publisher };
+} catch (error) {
+  if (production) throw error;
+  logger.warn({ err: error }, 'DEV: policy distribution unavailable (object storage down?): building and activating bundles answers 503; OPA keeps what it has');
+}
+
 const app = await buildControlApp({
-  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}) },
+  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}) },
   verifier,
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });

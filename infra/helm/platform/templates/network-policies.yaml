@@ -13,6 +13,11 @@
       control     web-fetch    webhook delivery only (module4.md §7)
       control     model        planner / intent model endpoint, by name (module4.md §9)
       execution   extractor    extract API only (module3.md §3.1)
+      execution   opa          the decision API only (module5.md §3)
+      execution   presidio     the analyzer only (module5.md §5.3)
+      opa         storage      signed bundles in object storage, 443 only; nothing else
+      presidio    anything     NOTHING but DNS
+      control     storage      writes signed bundles (module5.md §8.2)
       extractor   anything     NOTHING but DNS and the model endpoint — no tools, no data, no web
       web-fetch   internet     80/443 to PUBLIC addresses only — private, link-local, loopback
                                and cloud-metadata ranges are excluded at the network layer
@@ -183,6 +188,11 @@ spec:
     # Module 4: outbound webhooks are DELIVERED by the isolated web-fetch pod, not from here.
     - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "web-fetch") | nindent 8 }}
       toPorts: {{- include "tcp" (list 3005) | nindent 8 }}
+    # Module 5: signed policy bundles are WRITTEN to object storage; OPA reads them from there.
+    {{- with .Values.network.egress.objectStorage }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 443) | nindent 8 }}
+    {{- end }}
 
 # ============================================================ execution
 ---
@@ -216,6 +226,11 @@ spec:
     # Module 3: untrusted content is shown to a model only in the quarantined extractor.
     - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "extractor") | nindent 8 }}
       toPorts: {{- include "tcp" (list 3006) | nindent 8 }}
+    # Module 5: every step is decided by OPA; generated content is classified by Presidio.
+    - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "opa") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 8181) | nindent 8 }}
+    - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "presidio") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3000) | nindent 8 }}
     {{- if .Values.devDependencies.enabled }}
     - toEndpoints:
         {{- include "peer" (dict "ns" $co "app" "valkey") | nindent 8 }}
@@ -310,3 +325,32 @@ spec:
     - toCIDR: {{- include "cidrs" . }}
       toPorts: {{- include "tcp" (list 5432) | nindent 8 }}
     {{- end }}
+---
+# Module 5: the policy evaluator. Asked by the execution pod only; reaches object storage only.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: opa, namespace: {{ $xe }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: opa } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 8181) | nindent 8 }}
+    - fromEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 8181) | nindent 8 }}
+  {{- with .Values.network.egress.objectStorage }}
+  egress:
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 443) | nindent 8 }}
+  {{- end }}
+---
+# Module 5: PII/PHI detection. Asked by the execution pod only; it reaches nothing at all.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: presidio, namespace: {{ $xe }} }
+spec:
+  endpointSelector: { matchLabels: { app.kubernetes.io/name: presidio } }
+  ingress:
+    - fromEntities: [host]
+      toPorts: {{- include "tcp" (list 3000) | nindent 8 }}
+    - fromEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3000) | nindent 8 }}

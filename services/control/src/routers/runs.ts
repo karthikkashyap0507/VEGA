@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { fga, hasCapability } from '@vega/authz';
+import { canApproveAs, fga, hasCapability } from '@vega/authz';
 import { schema } from '@vega/db';
 import { CreateRun, RunDecision, RunInput, RunListQuery, TERMINAL_RUN_STATUSES, Uuid, type Ambiguity, type RunView } from '@vega/contracts';
 import { print, type Program } from '@vega/dsl';
@@ -34,7 +34,7 @@ export function refusal(e: unknown): never {
 }
 
 /** Read access: the run's workspace membership (or tenant-wide audit/administration). */
-async function readable(ctx: AuthedContext, id: string): Promise<RunView> {
+export async function readable(ctx: AuthedContext, id: string): Promise<RunView> {
   requireCapability(ctx, 'agents.read');
   const { core } = agentCore(ctx);
   const run = await core.store.view(ctx.principal.tenantId, id);
@@ -49,6 +49,24 @@ async function readable(ctx: AuthedContext, id: string): Promise<RunView> {
 async function actable(ctx: AuthedContext, id: string): Promise<RunView> {
   const run = await readable(ctx, id);
   if (run.principalUserId !== ctx.principal.userId) await requireRelation(ctx, 'can_manage', fga.agent(run.agentId));
+  return run;
+}
+
+/** Release or revoke a held action: its principal, or anyone who decides approvals. */
+async function holdAction(ctx: AuthedContext, id: string, action: 'release' | 'revoke'): Promise<RunView> {
+  const run = await readable(ctx, id);
+  if (run.principalUserId !== ctx.principal.userId) requireCapability(ctx, 'approvals.decide');
+  const pending = run.pending as { kind?: string; key?: string; toolId?: string } | null;
+  if (run.status !== 'HELD' || pending?.kind !== 'hold') throw new ProblemError(problems.preconditionFailed('this run has no action in a hold window'));
+  const { core } = agentCore(ctx);
+  await ctx.db((db) =>
+    db.insert(schema.platformEvents).values({ tenantId: run.tenantId, actorId: ctx.principal.userId, kind: action === 'release' ? 'run.hold_released' : 'run.hold_revoked', payload: { runId: run.id, key: pending.key ?? null, toolId: pending.toolId ?? null } }),
+  );
+  try {
+    await core.execution.signalRun({ tenantId: run.tenantId, runId: run.id, topic: 'resume', message: { action, by: ctx.principal.userId } });
+  } catch (e) {
+    return refusal(e);
+  }
   return run;
 }
 
@@ -183,12 +201,35 @@ export const runsRouter = router({
     return (await core.store.view(run.tenantId, run.id))!;
   }),
 
-  /** Decides the pending approval. The decision names exactly what the run showed (its key). */
+  /**
+   * Decides the pending approval. The decision names exactly what the run showed (its key).
+   *
+   * Module 5: a policy names WHO approves (`approver_role`); a dual approval needs two different
+   * people; under separation of duties the person the run acts for approves nothing. Refused
+   * here with a reason — and checked again by the executor, which is what lets the action run.
+   * Rejecting is always open to the run's own principal: stopping your own action needs no role.
+   */
   decide: procedure.input(RunDecision.extend({ id: Uuid })).mutation(async ({ ctx, input }) => {
     const run = await readable(ctx, input.id);
-    if (run.principalUserId !== ctx.principal.userId) requireCapability(ctx, 'approvals.decide');
-    const pending = run.pending as { kind?: string; key?: string } | null;
+    const pending = run.pending as {
+      kind?: string;
+      key?: string;
+      approvalsRequired?: number;
+      approvedBy?: string[];
+      policy?: { approverRole?: string | null; separationOfDuties?: boolean };
+    } | null;
     if (run.status !== 'AWAITING_APPROVAL' || pending?.kind !== 'approval' || !pending.key) throw new ProblemError(problems.preconditionFailed('this run is not waiting for an approval'));
+    const own = run.principalUserId === ctx.principal.userId;
+    const role = pending.policy?.approverRole ?? null;
+    if (input.decision === 'reject') {
+      if (!own) requireCapability(ctx, 'approvals.decide');
+    } else {
+      if (role) {
+        if (!canApproveAs(ctx.principal.role, role)) throw new ProblemError(problems.forbidden(`this action needs approval by ${role}; your role is ${ctx.principal.role}`));
+      } else if (!own) requireCapability(ctx, 'approvals.decide');
+      if (pending.policy?.separationOfDuties && own) throw new ProblemError(problems.forbidden('separation of duties: the person this run acts for cannot approve its action'));
+      if ((pending.approvedBy ?? []).includes(ctx.principal.userId)) throw new ProblemError(problems.conflict(`you have already approved this action; ${pending.approvalsRequired ?? 1} different approvers are required`));
+    }
     const { core } = agentCore(ctx);
     await ctx.db((db) =>
       db.insert(schema.platformEvents).values({ tenantId: run.tenantId, actorId: ctx.principal.userId, kind: 'run.decision', payload: { runId: run.id, key: pending.key, decision: input.decision, note: input.note ?? null } }),
@@ -200,6 +241,12 @@ export const runsRouter = router({
     }
     return run;
   }),
+
+  /** A policy hold (ALLOW_WITH_HOLD): run it now instead of when the window ends. */
+  release: procedure.input(z.object({ id: Uuid })).mutation(async ({ ctx, input }) => holdAction(ctx, input.id, 'release')),
+
+  /** A policy hold: cancel it inside its window. The action never happens. */
+  revoke: procedure.input(z.object({ id: Uuid })).mutation(async ({ ctx, input }) => holdAction(ctx, input.id, 'revoke')),
 
   /** Resumes a run waiting on a connector or a credential (after re-authorizing, say). */
   resume: procedure.input(z.object({ id: Uuid })).mutation(async ({ ctx, input }) => {

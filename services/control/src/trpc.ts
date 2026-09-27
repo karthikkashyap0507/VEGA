@@ -15,6 +15,7 @@ import type { ExposedFeatures, PlanLimits } from '@vega/contracts';
 import { tenantAttributes, type Span } from '@vega/telemetry';
 import type { ConnectorDeps } from './connectors/deps.js';
 import type { AgentCoreDeps, RunCoordinator } from './agent/coordinator.js';
+import type { PolicyPublisher } from './policy/publisher.js';
 
 /**
  * Control-plane RPC.
@@ -35,6 +36,8 @@ export interface ControlDeps {
   connectors?: ConnectorDeps;
   /** Module 4: intent, planning and the run coordinator. Absent: run procedures answer 503. */
   agent?: { core: AgentCoreDeps; coordinator: RunCoordinator };
+  /** Module 5: signing and distributing policy bundles. Absent: build/activate answer 503. */
+  policy?: { publisher: PolicyPublisher };
 }
 
 export interface Principal extends PrincipalClaims {
