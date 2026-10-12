@@ -122,6 +122,7 @@ export class ApprovalOrchestrator {
       run: { id: run.id, objective: run.objective.objective, trigger: run.trigger, requestedBy: run.principalUserId, requestedByName: facts.principalName, startedAt: now.toISOString() },
       action: { args: pending.args ?? {}, reversibility: pending.reversibility ?? 'R3', egress: pending.egressClass ?? 'EXTERNAL', holdWindowMs: policy?.holdWindowMs ?? null, effect: pending.effect ?? null },
       provenance: { argTaint: pending.argTaint ?? 'TRUSTED', argTaints: pending.argTaints ?? [] },
+      ...(pending.verification ? { verification: pending.verification } : {}),
       risk: policy ? { score: policy.riskScore ?? null, tier, factors: (policy.inputs?.factors as Record<string, number> | undefined) ?? null } : null,
       policy: { decision: policy?.decision ?? 'REQUIRE_APPROVAL', decidedBy: policy?.inputs?.decidedBy ?? null, reason: pending.reason ?? policy?.reason ?? null, citation: policy?.chain?.find((s) => s.citation)?.citation ?? null, chain: policy?.chain ?? [] },
     });

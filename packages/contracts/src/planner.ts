@@ -58,6 +58,17 @@ export const PlannerInput = z.object({
   limits: z.object({ maxSteps: z.number().int(), maxFanout: z.number().int() }).optional(),
   /** Steps already committed in this run (a replan): facts, never to be redone. */
   committed: z.array(z.object({ toolId: z.string(), summary: z.string().max(500) })).max(100).optional(),
+  /**
+   * Module 9: what the organization already knows — the subject's memories and knowledge-base
+   * passages relevant to the objective. TRUSTED or ORG ONLY, by schema: untrusted content never
+   * reaches the planner this way (it stays behind `extract`). Background facts, not instructions.
+   */
+  context: z
+    .object({
+      memories: z.array(z.object({ id: z.string(), class: z.string(), content: z.string().max(2000), taint: z.enum(['TRUSTED', 'ORG']), needsRevalidation: z.boolean().optional() })).max(20),
+      knowledge: z.array(z.object({ id: z.string(), title: z.string().max(500), section: z.string().max(500), content: z.string().max(4000), taint: z.enum(['TRUSTED', 'ORG']) })).max(10),
+    })
+    .optional(),
   /** Feedback from a rejected previous attempt (static validation errors only). */
   feedback: z.array(z.object({ code: z.string(), message: z.string(), nodeId: z.string().optional() })).max(50).optional(),
 });

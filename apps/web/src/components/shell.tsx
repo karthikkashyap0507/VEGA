@@ -2,6 +2,7 @@
 import {
   Activity,
   Bot,
+  BrainCircuit,
   ClipboardCheck,
   LogOut,
   MessageSquare,
@@ -102,6 +103,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <p className="truncate text-xs text-muted" title={me.user.email}>
             {me.user.email} · {me.user.role.replace('_', ' ').toLowerCase()}
           </p>
+          <Link href="/settings/memory" className="mt-2 flex items-center gap-1.5 text-xs text-muted hover:text-foreground">
+            <BrainCircuit aria-hidden className="size-3.5" /> What it remembers
+          </Link>
           <button
             type="button"
             onClick={signOut}

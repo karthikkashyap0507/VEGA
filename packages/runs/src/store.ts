@@ -27,6 +27,11 @@ export interface RunCheckpoint {
   approvals: string[];
   /** Hold keys (same shape) whose hold window passed or that someone released early (Module 5). */
   released?: string[] | undefined;
+  /**
+   * Module 9: knowledge-base passages retrieved for the principal at planning time (ACL-gated
+   * there, TRUSTED/ORG only) — what groundedness may find a generated claim in.
+   */
+  knowledge?: Array<{ id: string; text: string; taint: 'TRUSTED' | 'ORG' }> | undefined;
   /** Module 6 edit and requeue: original call key → the hold whose edited content replaces it. */
   edits?: Record<string, string> | undefined;
   /**

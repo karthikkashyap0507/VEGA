@@ -107,6 +107,10 @@ export function actionReceipt(ctx: StepContext, r: Receipt): { payload: ActionRe
     hold: rec.hold ? { window_ms: rec.hold.windowMs, released: rec.hold.released, revoked: rec.hold.revoked } : null,
     subjects: subjectsOf(ctx),
   };
+  if (rec.verification) {
+    const v = rec.verification;
+    payload.verification = { id: v.id, phase: v.phase, outcome: v.outcome, failed_check: v.checks.find((c) => c.outcome === 'ABORT' || c.outcome === 'COMPENSATE' || c.outcome === 'ESCALATE')?.check ?? null, checks_digest: bag.json({ checks: v.checks, unsupported_claims: v.unsupportedClaims }) };
+  }
   if (rec.programArgs) (payload as ActionReceipt & { program_arguments_digest?: string }).program_arguments_digest = bag.json(rec.programArgs);
 
   if (r.phase === 'pre' && rec.tape) payload.replay_tape_digest = bag.json(replayTape(ctx, rec, bag), 'body');

@@ -253,6 +253,17 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
         [tenantId, userId],
       );
       await client.query(`INSERT INTO webauthn_credentials (tenant_id, user_id, credential_id, public_key) VALUES ($1, $2, 'seed-' || gen_random_uuid(), 'seed')`, [tenantId, userId]);
+      // Module 9: one of everything verification, memory and the knowledge base write.
+      const ver = await client.query<{ id: string }>(
+        `INSERT INTO verifications (tenant_id, run_id, node_id, tool_id, phase, checks_json, outcome) VALUES ($1, $2, $3, 'gmail.send', 'pre_commit', '[]', 'PASS') RETURNING id`,
+        [tenantId, run.rows[0]!.id, node.rows[0]!.id],
+      );
+      await client.query(`INSERT INTO groundedness_findings (tenant_id, verification_id, claim_text, claim_kind, verdict, supported, confidence, severity) VALUES ($1, $2, 'seed', 'fact', 'SUPPORTED', true, 1, 'INFO')`, [tenantId, ver.rows[0]!.id]);
+      const mem = await client.query<{ id: string }>(`INSERT INTO memories (tenant_id, scope, subject_id, class, content, provenance_json, source_taint) VALUES ($1, 'user', $2, 'preference', 'seed', '{}', 'TRUSTED') RETURNING id`, [tenantId, userId]);
+      await client.query(`INSERT INTO memory_conflicts (tenant_id, existing_id, proposed_json) VALUES ($1, $2, '{}')`, [tenantId, mem.rows[0]!.id]);
+      const doc = await client.query<{ id: string }>(`INSERT INTO kb_documents (tenant_id, source_kind, title, content_ref, content_digest, mime, acl_ref) VALUES ($1, 'upload', 'seed', 'seed', 'sha256:seed', 'text/plain', 'document:seed') RETURNING id`, [tenantId]);
+      await client.query(`INSERT INTO kb_chunks (tenant_id, document_id, ordinal, content, token_count) VALUES ($1, $2, 0, 'seed', 1)`, [tenantId, doc.rows[0]!.id]);
+      await client.query(`INSERT INTO retrievals (tenant_id, query, chunk_ids, memory_ids, acl_filtered) VALUES ($1, 'seed', '{}', '{}', 0)`, [tenantId]);
       await client.query(`INSERT INTO webauthn_challenges (tenant_id, user_id, purpose, challenge, expires_at) VALUES ($1, $2, 'register', 'seed', now())`, [tenantId, userId]);
 
       made['tenant' + key] = tenantId;

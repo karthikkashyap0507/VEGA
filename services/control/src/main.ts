@@ -5,7 +5,10 @@ import { safePost } from '@vega/connector-web';
 import { AnthropicClient } from '@vega/llm';
 import { DevPlannerModel } from '@vega/planner';
 import { s3FromEnv } from '@vega/objectstore';
-import { DEFAULT_CATALOG } from '@vega/policy-engine';
+import { DEFAULT_CATALOG, PatternClassifier, PresidioClassifier } from '@vega/policy-engine';
+import { doclingServe, embedderFromEnv, KnowledgeBase, rerankerFromEnv } from '@vega/knowledge';
+import { MemoryStore } from '@vega/memory';
+import { KnowledgeService } from './knowledge/service.js';
 import { RunStore } from '@vega/runs';
 import { RunCoordinator, type WebhookDeliverer } from './agent/coordinator.js';
 import { heuristicMentions, llmMentions } from './agent/intent.js';
@@ -109,6 +112,26 @@ if (!llm) {
   if (production) throw new Error('a planner model is required in production (LITELLM_MASTER_KEY or ANTHROPIC_API_KEY)');
   logger.warn('DEV: no model key: planning uses the DEVELOPMENT PLANNER (a fixed set of objective shapes) and heuristic entity mentions');
 }
+// ---------------------------------------------------------------- knowledge & memory (Module 9)
+// Embeddings and reranking are self-hosted (vLLM): document content never leaves the perimeter.
+if (production && !env['VLLM_EMBEDDINGS_URL']) throw new Error('VLLM_EMBEDDINGS_URL is required in production: embeddings are self-hosted');
+if (!env['DOCLING_URL']) logger.warn('DOCLING_URL unset: PDF/PPTX/scans cannot be ingested into the knowledge base (text, Markdown, HTML and DOCX can)');
+const embedder = embedderFromEnv(env, (m) => logger.warn(m));
+const knowledge = new KnowledgeService(
+  new KnowledgeBase({
+    embedder,
+    reranker: rerankerFromEnv(env),
+    fga,
+    objects: s3FromEnv(env, env['S3_BUCKET_KB'] ?? 'vega-kb'),
+    classifier: env['PRESIDIO_ANALYZER_URL'] ? new PresidioClassifier(env['PRESIDIO_ANALYZER_URL']) : new PatternClassifier(),
+    docling: env['DOCLING_URL'] ? doclingServe(env['DOCLING_URL']) : undefined,
+    log: logger,
+  }),
+  new MemoryStore({ embedder, log: logger }),
+  new RunStore(),
+  logger,
+);
+
 let agent;
 if (connectors) {
   const issuer = await loadRunTokenIssuer(env, logger, production);
@@ -139,6 +162,7 @@ if (connectors) {
           llm,
           model: env['MODEL_PLANNER'] ?? DEFAULT_CATALOG.best.planner,
           source: 'planner' as const,
+          context: (run: Parameters<KnowledgeService['planningContext']>[0]) => knowledge.planningContext(run),
           // C4 (Module 5): the tenant's plan, residency and budget choose the planner model.
           route: plannerRoute({
             ...DEFAULT_CATALOG,
@@ -146,7 +170,7 @@ if (connectors) {
             economy: { ...DEFAULT_CATALOG.economy, planner: env['MODEL_PLANNER_ECONOMY'] ?? DEFAULT_CATALOG.economy.planner },
           }),
         }
-      : { execution: connectors.execution, llm: new DevPlannerModel(), model: 'dev-planner', source: 'dev_planner' as const },
+      : { execution: connectors.execution, llm: new DevPlannerModel(), model: 'dev-planner', source: 'dev_planner' as const, context: (run: Parameters<KnowledgeService['planningContext']>[0]) => knowledge.planningContext(run) },
   };
   const coordinator = new RunCoordinator(core);
   coordinator.start();
@@ -213,7 +237,7 @@ if (!env['NTFY_URL']) logger.warn('NTFY_URL unset: approvals are batched and cou
 dispatcher.start(Number(env['APPROVAL_DISPATCH_INTERVAL_MS'] ?? 30_000));
 
 const app = await buildControlApp({
-  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility, ...(evidence ? { evidence } : {}), approvals },
+  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility, ...(evidence ? { evidence } : {}), approvals, knowledge },
   verifier,
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });

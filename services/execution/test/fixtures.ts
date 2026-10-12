@@ -123,6 +123,7 @@ export class HookRecorder {
     return {
       policy: async (c) => (rec(c, 'policy'), inner.policy(c)),
       simulate: async (c) => (rec(c, 'simulate'), inner.simulate(c)),
+      preVerify: async (c, i) => (rec(c, 'preVerify'), inner.preVerify(c, i)),
       approval: async (c, s, p, a) => (rec(c, 'approval'), inner.approval(c, s, p, a)),
       receipt: async (c, r) => (rec(c, r.phase === 'pre' ? 'receipt:pre' : 'receipt:post'), inner.receipt(c, r)),
       captureCompensator: async (c, s) => (rec(c, 'captureCompensator'), inner.captureCompensator(c, s)),

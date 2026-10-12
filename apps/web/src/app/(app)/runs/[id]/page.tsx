@@ -1,5 +1,6 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ErrorText } from '@/components/error-text';
 import { ProvenanceGraph, type GraphNode } from '@/components/provenance/provenance-graph';
@@ -37,7 +38,12 @@ export default function RunInspectorPage() {
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-4">
       <header className="grid gap-1">
-        <h1 className="text-lg font-semibold">Run</h1>
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-lg font-semibold">Run</h1>
+          <Link className="text-sm text-primary hover:underline" href={`/runs/${id}/trace`} data-testid="trace-link">
+            Trace and evidence
+          </Link>
+        </div>
         <p className="text-sm">{run.objective.objective}</p>
         <StreamingStatus connected={stream.connected} events={stream.events} status={run.status} />
         {run.statusReason ? <p className="text-sm text-muted">{run.statusReason}</p> : null}

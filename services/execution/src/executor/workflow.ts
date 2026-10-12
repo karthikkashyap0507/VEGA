@@ -194,6 +194,11 @@ export function runWorkflow(deps: ExecutorDeps) {
       if (result.status === 'completed') {
         await ctx.step(`complete:${passNo}:skip`, () => deps.store.skipPending(tenantId, runId), { retries: 5 });
         const emits = result.emits.map((e) => ({ data: e.data, taint: e.taint, dataTaint: e.dataTaint, sourceIds: [...e.sourceIds] }));
+        // Module 9: what the run asked to remember, and its task history — through the taint gate.
+        if (deps.memory) {
+          const mem = deps.memory;
+          await ctx.step(`remember:${passNo}`, () => mem.completed(run, emits), { retries: 2 });
+        }
         const t = await transition(`completed:${passNo}`, 'COMPLETED', { result: { emits, calls: result.calls.length, traceDigest: result.traceDigest, programVersion: version } });
         return t.ok ? { status: 'COMPLETED' } : { status: t.from };
       }
@@ -420,6 +425,7 @@ export function runWorkflow(deps: ExecutorDeps) {
           const t = await transition(`attention:${passNo}`, 'NEEDS_ATTENTION', { reason: stop.message, pending: { kind: 'attention', reason: stop.message } });
           return t.ok ? { status: 'NEEDS_ATTENTION', reason: stop.message } : { status: t.from };
         }
+        if (stop.reason === 'verify_compensate') return end(`verifyfailed:${passNo}`, 'FAILED', stop.message, { error: { reason: 'verification' }, trigger: 'verification' });
         if (stop.reason === 'divergence') return end(`diverged:${passNo}`, 'FAILED', stop.message, { error: { reason: 'divergence' }, trigger: 'divergence' });
         if (stop.reason === 'policy_denial' || stop.reason === 'verify_failure') {
           const out = await replan(stop.reason, { message: stop.message });

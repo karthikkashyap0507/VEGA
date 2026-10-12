@@ -5,6 +5,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { ErrorText } from '@/components/error-text';
 import { ProvenanceChip } from '@/components/provenance/taint';
 import { Button } from '@/components/ui/button';
+import { CheckList } from '@/components/verification/verification-panel';
 import { RiskBadge, type RiskTier } from '@/components/ui/risk-badge';
 import { approvalActions, countdown, type PacketView } from '@/lib/approvals';
 import { cn } from '@/lib/utils';
@@ -151,6 +152,13 @@ export const DecisionPacket = forwardRef<PacketHandle, { view: PacketView; onDec
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {p.verification ? (
+        <section aria-label="Verification" className="grid gap-1" data-testid="packet-verification">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Verification</h3>
+          <CheckList checks={p.verification.checks} />
+        </section>
       ) : null}
 
       <section aria-label="Evidence">

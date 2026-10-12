@@ -1,2 +1,4 @@
-// @vega/knowledge - implemented in M9. See docs/module9.md
-export {};
+export * from './embed.js';
+export * from './parse.js';
+export * from './rerank.js';
+export * from './store.js';

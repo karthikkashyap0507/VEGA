@@ -4,6 +4,7 @@ import { defaultHooks, type Hooks, type PolicyDecision, type Receipt, type Simul
 import type { EvidenceAppendClient } from '../evidence-append.js';
 import { actionReceipt, programEntry } from '../evidence-receipt.js';
 import type { ReversibilityEngine } from '../reversibility/engine.js';
+import { VerificationEngine, type VerificationDeps } from '../verification/engine.js';
 import type { ExecutorLog, ProgramReceipt, ToolInvoker } from './pass.js';
 
 /**
@@ -17,7 +18,9 @@ import type { ExecutorLog, ProgramReceipt, ToolInvoker } from './pass.js';
  *               that fails stops the call (the pre-state would be gone afterwards)
  *   receipt   — Module 7: the §5.1 receipt, appended to the signed chain (`action.pre` before
  *               the call, `action.post` after) with the content it commits to, and mirrored to
- *               platform_events. A failed append THROWS, and the executor then does not make the
+ *               platform_events.
+ *   preVerify / verify — Module 9: the six checks before approval, and what actually happened
+ *               after the call (services/execution/src/verification). Always installed. A failed append THROWS, and the executor then does not make the
  *               call: "no side effect occurs before its audit entry is committed" (invariant 2).
  */
 export function executionHooks(opts: {
@@ -28,6 +31,10 @@ export function executionHooks(opts: {
   policy: (ctx: StepContext) => Promise<PolicyDecision>;
   /** Module 6: capture the compensation BEFORE the call. Without it the hook warns (ungoverned). */
   reversibility?: ReversibilityEngine | undefined;
+  /** Module 9: the verification engine; built from `classify`/`kb` when not given. */
+  verification?: VerificationEngine | undefined;
+  classify?: VerificationDeps['classify'];
+  kb?: VerificationDeps['kb'];
 }): Hooks {
   const simulate = async (ctx: StepContext): Promise<SimulationResult> => {
     if (ctx.tool.reversibility === 'R0') {
@@ -68,7 +75,8 @@ export function executionHooks(opts: {
     await withTenant(ctx.tenantId, (db) => db.insert(schema.platformEvents).values({ tenantId: ctx.tenantId, actorId: null, kind: `action.receipt.${r.phase}`, payload: event }));
   };
 
-  const hooks = defaultHooks(opts.log, simulate, recordEvent, opts.policy);
+  const verifier = opts.verification ?? new VerificationEngine({ log: opts.log, classify: opts.classify, kb: opts.kb });
+  const hooks = defaultHooks(opts.log, simulate, recordEvent, opts.policy, { preVerify: (ctx, i) => verifier.preVerify(ctx, i), verify: (ctx, r) => verifier.verify(ctx, r) });
   const rev = opts.reversibility;
   return rev ? { ...hooks, captureCompensator: (ctx) => rev.arm(ctx) } : hooks;
 }

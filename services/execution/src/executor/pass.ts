@@ -1,6 +1,6 @@
 import type { Ambiguity, ToolDeclarationRecord, ToolResult } from '@vega/contracts';
 import { argsDigest } from '@vega/connector-sdk';
-import type { DurableContext, Hooks, PolicyDecision, ReceiptRecord, ReceiptTape, SimulationResult, StepContext } from '@vega/orchestration';
+import type { DurableContext, Hooks, PolicyDecision, ReceiptRecord, ReceiptTape, SimulationResult, StepContext, VerificationInput } from '@vega/orchestration';
 import {
   RunSuspended,
   type DeclarationPort,
@@ -20,6 +20,7 @@ import {
 import type { JournalRow, LoadedRun, RunStore } from '@vega/runs';
 import type { ReversibilityEngine } from '../reversibility/engine.js';
 import type { ApprovalOrchestrator } from '../approvals/orchestrator.js';
+import type { RunMemory } from '../verification/memory.js';
 import type { TaintLevel as Taint } from '@vega/contracts';
 
 /**
@@ -87,6 +88,8 @@ export interface ExecutorDeps {
   programReceipt?: ((p: ProgramReceipt) => Promise<void>) | undefined;
   /** Module 8: approval requests (routing, packet, expiry, fallback, escalation). Absent: the bare decision message. */
   approvals?: ApprovalOrchestrator | undefined;
+  /** Module 9: what a completed run remembers (the taint gate decides what may be). */
+  memory?: RunMemory | undefined;
 }
 
 export interface ProgramReceipt {
@@ -107,6 +110,7 @@ export type StopReason =
   | 'policy_denial'
   | 'policy_unavailable'
   | 'verify_failure'
+  | 'verify_compensate'
   | 'unknown_outcome'
   | 'not_allowed'
   | 'limit'
@@ -151,6 +155,8 @@ export interface PendingAction {
   assumptions?: string[];
   ambiguity?: Ambiguity;
   connector?: string;
+  /** Module 9: what the pre-commit checks found — the approval packet shows it. */
+  verification?: { outcome: string; checks: Array<{ check: string; outcome: string; detail: string }>; unsupportedClaims: Array<{ text: string; reason: string }> };
 }
 
 export type SuspendStatus = 'awaiting_approval' | 'awaiting_input' | 'held';
@@ -239,6 +245,10 @@ export class DurablePass implements ToolPort {
   private readonly tape: Pick<ReceiptTape, 'calls' | 'extractions' | 'lookups'> = { calls: [], extractions: [], lookups: [] };
   /** The pre-receipt record per journal row, so the post receipt carries the same context. */
   private readonly receipts = new Map<string, ReceiptRecord>();
+  /** Module 9: what each call's pre-commit verification saw, for its post-commit verification. */
+  private readonly vInputs = new Map<string, VerificationInput>();
+  /** The declared output taint of each call's result (the evidence a claim is found in). */
+  private readonly readTaints = new Map<number, Taint>();
 
   constructor(private readonly cfg: PassConfig) {
     const inner = cfg.deps.recorder();
@@ -302,6 +312,20 @@ export class DurablePass implements ToolPort {
     return { ...pre, ...(result !== undefined ? { result } : {}) };
   }
 
+  /** Module 9: everything the run read before call `seq`, each with its declared taint. */
+  private reads(seq: number): VerificationInput['reads'] {
+    const out: VerificationInput['reads'] = [];
+    for (const c of this.tape.calls) {
+      const r = c.result as ToolResult<unknown> | undefined;
+      if (c.seq < seq && r?.ok) out.push({ id: `call:${c.seq}:${c.toolId}`, value: r.effect.detail ?? r.effect.summary, taint: this.readTaints.get(c.seq) ?? 'UNTRUSTED' });
+    }
+    for (const k of this.cfg.run.checkpoint.knowledge ?? []) out.push({ id: k.id, value: k.text, taint: k.taint });
+    for (const l of this.tape.lookups) if (l.entity) out.push({ id: `${l.registry}:${l.key}`, value: l.entity, taint: 'TRUSTED' });
+    // An extraction carries the taint of what it read; not knowing it here, assume the worst.
+    for (const x of this.tape.extractions) if (!x.error) out.push({ id: `extract:${x.seq}:${x.schema}`, value: x.value, taint: 'UNTRUSTED' });
+    return out;
+  }
+
   /** The tape up to (not including) call `seq`, with the program it runs. */
   private tapeFor(seq: number): ReceiptTape | undefined {
     const p = this.cfg.program;
@@ -341,6 +365,7 @@ export class DurablePass implements ToolPort {
       case 'result':
         if (!outcome.result.ok) this.failure = { toolId: inv.toolId, code: outcome.result.error.code, message: outcome.result.error.message, callSeq: seq };
         this.tape.calls.push({ seq, toolId: inv.toolId, args: inv.args, result: outcome.result });
+        this.readTaints.set(seq, decl.outputTaint as Taint);
         return outcome.result;
       case 'suspend':
         this.suspension = { status: outcome.status, pending: outcome.pending };
@@ -507,16 +532,29 @@ export class DurablePass implements ToolPort {
     const added = editedFrom ? recipientsAdded(decl, inv0.args, inv.args) : [];
     const carried = !!editedFrom && !tierUp && !added.length;
     const why = tierUp ? `the edit raised the risk from ${editedFrom!.tier ?? 'unknown'} to ${policy.riskTier ?? 'unknown'}` : `the edit added ${added.length === 1 ? 'a recipient' : 'recipients'} (${added.join(', ')})`;
-    const merged: PolicyDecision = editedFrom && !carried ? { ...merged0, decision: needs(merged0) ? merged0.decision : 'REQUIRE_APPROVAL', reason: `${why}; approve it again — ${merged0.reason ?? ''}`.trim() } : merged0;
+    const merged1: PolicyDecision = editedFrom && !carried ? { ...merged0, decision: needs(merged0) ? merged0.decision : 'REQUIRE_APPROVAL', reason: `${why}; approve it again — ${merged0.reason ?? ''}`.trim() } : merged0;
     const approved = approvals.has(key) || carried;
     const approvalInfo = run.checkpoint.approvalInfo?.[key] ?? (carried ? run.checkpoint.approvalInfo?.[baseKey] : undefined);
+    // 2b — verification, pre-commit (M9): the six checks on the arguments actually about to be
+    // sent. ABORT stops the step (the run replans); ESCALATE puts a person in front of it.
+    const objective = [run.objective.objective, ...run.objective.constraints, ...run.objective.successCriteria].join('\n');
+    const vin: VerificationInput = { sim, policy: merged1, engineDecision: policy.decision, approved, objective, reads: this.reads(seq) };
+    const pre = await hooks.preVerify(sctx, vin);
+    if (pre.outcome === 'ABORT') {
+      await mark({ status: 'failed', error: { code: 'VERIFICATION_FAILED', message: pre.reason ?? 'verification failed', ...(pre.id ? { verificationId: pre.id } : {}) }, end: true });
+      return { kind: 'stop', reason: 'verify_failure', message: `verification stopped ${inv.toolId}: ${pre.reason ?? 'a check failed'}` };
+    }
+    const merged: PolicyDecision =
+      pre.outcome === 'ESCALATE' && !needs(merged1) ? { ...merged1, decision: 'REQUIRE_APPROVAL', reason: `verification: ${pre.reason ?? 'a person should check this'}`, approverRole: merged1.approverRole ?? null } : merged1;
+    this.vInputs.set(row.id, { ...vin, policy: merged });
+    const verification = pre.checks.length ? { outcome: pre.outcome, checks: pre.checks, unsupportedClaims: pre.unsupportedClaims } : undefined;
     const approval = await hooks.approval(sctx, sim, merged, approved);
     if (approval.decision === 'WAIT' || (needs(merged) && !approved)) {
       if (approval.decision !== 'WAIT') deps.log.error({ run_id: run.id, tool_id: inv.toolId }, 'approval hook returned PROCEED for a call that requires approval; holding it anyway');
       await mark({ status: 'approving', effect });
       const reason = approval.decision === 'WAIT' ? approval.reason : (merged.reason ?? 'approval required');
       const approvalsRequired = merged.decision === 'REQUIRE_DUAL_APPROVAL' ? 2 : 1;
-      return { kind: 'suspend', status: 'awaiting_approval', pending: { ...base, kind: 'approval', key, reason, policy: merged, effect, approvalsRequired, approvedBy: [] } };
+      return { kind: 'suspend', status: 'awaiting_approval', pending: { ...base, kind: 'approval', key, reason, policy: merged, effect, approvalsRequired, approvedBy: [], ...(verification ? { verification } : {}) } };
     }
     // 3b — the hold window (M5 ALLOW_WITH_HOLD, or a policy's hold after approval). The action
     // waits, revocable, and then runs by itself: `released` says its window has passed.
@@ -551,6 +589,7 @@ export class DurablePass implements ToolPort {
       ...(d !== d0 ? { programArgs: inv0.args } : {}),
       program: { digest: this.cfg.program?.program.digest ?? null, modelId: this.cfg.program?.program.modelId ?? null },
       tape: this.tapeFor(seq),
+      verification: pre,
     };
     this.receipts.set(row.id, record);
     try {
@@ -662,10 +701,12 @@ export class DurablePass implements ToolPort {
     // 6 — divergence (M6 §5.7): the actual effect against what was simulated and approved.
     const div = rev && sim ? await rev.diverged(sctx, sim, result.effect, actionId).catch((e) => (deps.log.error({ err: e, run_id: run.id }, 'divergence check failed'), { abort: false, message: '' })) : { abort: false, message: '' };
     // 7 — verify (M9), then 8 — the post receipt (M7)
-    const v = await deps.hooks.verify(sctx, { effect: result.effect });
-    await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'committed', effect, record: this.postRecord(row.id, result) }).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'post-receipt failed'));
+    const vin = this.vInputs.get(row.id);
+    const v = await deps.hooks.verify(sctx, { effect: result.effect, ...(vin ? { input: vin } : {}) });
+    await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'committed', effect, record: { ...this.postRecord(row.id, result), verification: v.verification } }).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'post-receipt failed'));
     if (div.abort) return { kind: 'stop', reason: 'divergence', message: `${div.message}: the run was stopped and what it did is being undone` };
-    if (!v.ok) return { kind: 'stop', reason: 'verify_failure', message: `verification failed for ${inv.toolId}: ${v.reason}` };
+    // Post-commit: it already happened — the run fails and its saga undoes what it did (M6).
+    if (!v.ok) return { kind: 'stop', reason: v.compensate ? 'verify_compensate' : 'verify_failure', message: `verification failed for ${inv.toolId} after it ran: ${v.reason}` };
     return { kind: 'result', result };
   }
 }

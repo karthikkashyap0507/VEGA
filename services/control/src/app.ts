@@ -26,7 +26,8 @@ export interface ControlAppOptions {
 export async function buildControlApp(options: ControlAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: false,
-    bodyLimit: 1024 * 1024,
+    // Internal, behind the gateway (which enforces 1 MB per route, and more only for uploads).
+    bodyLimit: 30 * 1024 * 1024,
     ...(options.https ? { https: options.https } : {}),
   }) as unknown as FastifyInstance;
 

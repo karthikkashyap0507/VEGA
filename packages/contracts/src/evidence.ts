@@ -83,6 +83,8 @@ export interface ActionReceipt {
   effect_digest?: string | null | undefined;
   effect_summary?: string | null | undefined;
   error?: string | null | undefined;
+  /** Module 9: the verification of this phase — its row, verdict, and the checks (content). */
+  verification?: { id: string | null; phase: 'pre_commit' | 'post_commit'; outcome: string; failed_check: string | null; checks_digest: string } | undefined;
 }
 
 /**

@@ -23,6 +23,9 @@ import { EvidenceAppendClient } from './evidence-append.js';
 import { ApprovalOrchestrator } from './approvals/orchestrator.js';
 import { executionHooks, programReceipt, RUN_WORKFLOW, runWorkflow, type RunTokenCheck } from './executor/index.js';
 import { policyEngineFromEnv } from './policy/index.js';
+import { embedderFromEnv } from '@vega/knowledge';
+import { MemoryStore } from '@vega/memory';
+import { RunMemory, VerificationEngine } from './verification/index.js';
 import { RuntimeDeclarations } from './programs.js';
 import { ReversibilityStore } from '@vega/compensators';
 import { ntfyNotifier, ntfyPager, ReversibilityEngine, ROLLBACK_WORKFLOW, rollbackWorkflow, valkeyCache } from './reversibility/index.js';
@@ -149,7 +152,9 @@ if (orchestrator && internalToken) {
       declarations,
       extractor,
       entities: new PgEntities(),
-      hooks: executionHooks({ log: logger, invoker, evidence, requireEvidence: production, policy: (ctx) => policy.decide(ctx), reversibility }),
+      // Module 9: the six checks use M5's cached classifier; memory is embedded self-hosted.
+      hooks: executionHooks({ log: logger, invoker, evidence, requireEvidence: production, policy: (ctx) => policy.decide(ctx), reversibility, verification: new VerificationEngine({ log: logger, classify: (t, text) => policy.classify(t, text) }) }),
+      memory: new RunMemory(new MemoryStore({ embedder: embedderFromEnv(env, (m) => logger.warn(m)), log: logger }), logger),
       schemas: new SchemaRegistry(),
       recorder: () => new PgRecorder(),
       log: logger,

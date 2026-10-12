@@ -8,6 +8,7 @@ import { ErrorText } from '@/components/error-text';
 import { ProvenanceGraph, type GraphNode } from '@/components/provenance/provenance-graph';
 import { ProvenanceChip } from '@/components/provenance/taint';
 import { Button } from '@/components/ui/button';
+import { RetrievalInspector, RunVerifications } from '@/components/verification/verification-panel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { RiskBadge, type RiskTier } from '@/components/ui/risk-badge';
 import { api } from '@/lib/api';
@@ -266,6 +267,22 @@ export default function RunTracePage() {
           </p>
         )}
       </Question>
+
+      <Question n={7} title="Verification" testId="c8-verification">
+        <RunVerifications runId={id} />
+      </Question>
+
+      <Card>
+        <CardHeader>
+          <div className="grid gap-0.5">
+            <CardTitle>Retrieval inspector</CardTitle>
+            <CardDescription>What was retrieved from memory and the knowledge base, and how much was withheld by permission.</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <RetrievalInspector runId={id} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

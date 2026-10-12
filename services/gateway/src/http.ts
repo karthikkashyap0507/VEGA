@@ -55,6 +55,8 @@ export interface RouteSpec<
   body?: B;
   response?: z.ZodType;
   successStatus?: number;
+  /** Larger than the app-wide limit, for this route only (document uploads). */
+  bodyLimit?: number;
   handler: (
     ctx: A extends false ? HandlerCtx<Infer<P>, Infer<Q>, Infer<B>> : AuthedCtx<Infer<P>, Infer<Q>, Infer<B>>,
   ) => Promise<unknown>;
@@ -108,6 +110,7 @@ export function defineRoute<
   app.route({
     method: spec.method,
     url: spec.url,
+    ...(spec.bodyLimit ? { bodyLimit: spec.bodyLimit } : {}),
     schema: {
       summary: spec.summary,
       tags: spec.tags,

@@ -1,3 +1,4 @@
+import type { KnowledgeService } from './knowledge/service.js';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import type { Logger } from '@vega/shared';
@@ -47,6 +48,8 @@ export interface ControlDeps {
   evidence?: EvidenceClient | undefined;
   /** Module 8: approval requests (decide-time authorization, packets, corpus, mobile step-up). Absent: 503. */
   approvals?: ApprovalService | undefined;
+  /** Module 9: the knowledge base and memory (owned here), and planning context. Absent: 503. */
+  knowledge?: KnowledgeService | undefined;
 }
 
 /** The read half of the fast revoke path (execution writes it when a hold opens). */

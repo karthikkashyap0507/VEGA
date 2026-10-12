@@ -14,6 +14,8 @@ export interface DecisionPacket {
   policy: { decision: string; id: string | null; citation: string | null; reason: string | null; reason_chain: Array<{ step: string; detail: string }> };
   routing: { approver_role: string; approvals_required: number; separation_of_duties: boolean };
   recommended: 'approve' | 'reject';
+  /** Module 9 (present only when verification ran): the pre-commit checks, in order. */
+  verification?: { outcome: string; checks: Array<{ check: string; outcome: string; detail: string }> };
   if_you_do_nothing: { at: string; fallback: string; outcome: string };
   actions: string[];
 }

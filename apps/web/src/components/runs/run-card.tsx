@@ -10,6 +10,7 @@ import { RunUndo } from '@/components/reversibility/undo';
 import { Button } from '@/components/ui/button';
 import { runActions, runKeys, TERMINAL, useRun, useRunStream, type PendingAction } from '@/lib/runs';
 import { ActionCard } from './action-card';
+import { ApprovalPacket } from '@/components/approvals/approval-packet';
 import { ClarificationPrompt } from './clarification-prompt';
 import { HoldCard } from './hold-card';
 import { StreamingStatus } from './status';
@@ -64,7 +65,9 @@ export function RunCard({ runId }: { runId: string }) {
         </p>
       ) : null}
       {!TERMINAL.has(run.status) ? <BlastRadiusPanel runId={run.id} compact /> : null}
-      {run.status === 'AWAITING_APPROVAL' && pending?.kind === 'approval' ? (
+      {run.status === 'AWAITING_APPROVAL' && pending?.kind === 'approval' && pending.approvalRequestId ? (
+        <ApprovalPacket requestId={pending.approvalRequestId} onDone={() => void qc.invalidateQueries({ queryKey: runKeys.run(run.id) })} />
+      ) : run.status === 'AWAITING_APPROVAL' && pending?.kind === 'approval' ? (
         <ActionCard action={pending} runId={run.id} busy={busy} onDecide={(d, note) => act(() => runActions.decide(run.id, d, note))()} />
       ) : null}
       {run.status === 'HELD' && pending?.kind === 'hold' ? (

@@ -31,6 +31,8 @@ export interface PlanningDeps {
   pricePerMTok?: { input: number; output: number };
   /** C4 (Module 5): chooses the planner model per tenant (plan, residency, budget). */
   route?: ((run: { tenantId: string }) => Promise<{ model: string; queue?: boolean; reasons: string[] }>) | undefined;
+  /** Module 9: memories and knowledge relevant to the objective (TRUSTED/ORG only), logged as a retrieval. */
+  context?: ((run: LoadedRun) => Promise<PlannerInput['context']>) | undefined;
 }
 
 export type PlanOutcome =
@@ -132,8 +134,15 @@ export async function planRun(
       run.checkpoint.triggerPayload !== undefined
         ? [{ id: `trigger:${run.id}`, taint: 'UNTRUSTED', kind: 'record', binding: 'trigger_payload', ...(Array.isArray(run.checkpoint.triggerPayload) ? { itemCount: run.checkpoint.triggerPayload.length } : {}) }]
         : [];
+    let context: PlannerInput['context'];
+    try {
+      context = await deps.context?.(run);
+    } catch {
+      context = undefined; // planning never waits on memory or the knowledge base
+    }
     const input: PlannerInput = {
       objective: run.objective.objective,
+      ...(context ? { context } : {}),
       sources,
       tools: plannerTools,
       schemas: catalog.schemas,

@@ -35,6 +35,9 @@ export interface PendingAction {
   kind: 'approval' | 'clarification' | 'reauthorize' | 'credential' | 'hold' | 'replan' | 'attention' | 'assumptions';
   reason: string;
   key?: string;
+  /** Module 8: the approval request this pause waits on (decide it through its packet). */
+  approvalRequestId?: string;
+  expiresAt?: string;
   version?: number;
   callSeq?: number;
   dslNodeId?: string;

@@ -1,5 +1,3 @@
 # @vega/memory
 
-**Status: placeholder. Implemented in M9.**
-
-See [docs/module9.md](../../docs/module9.md) for the specification.
+Module 9 C7: five memory classes, the taint gate (memory is written only from TRUSTED or ORG sources), contradiction detection that never overwrites, decay, and the subject's control. See [docs/module9-implementation.md](../../docs/module9-implementation.md).

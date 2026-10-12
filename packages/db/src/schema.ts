@@ -388,6 +388,8 @@ export const runs = pgTable('runs', {
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
+  /** Module 9: the run's verification outcomes, denormalized for Module 10's long scans. */
+  verificationSummary: jsonb('verification_summary'),
 });
 
 export const taskNodes = pgTable('task_nodes', {
@@ -914,6 +916,129 @@ export const webauthnChallenges = pgTable('webauthn_challenges', {
 });
 
 
+// ------------------------------------------------------------------ Module 9 (0012_knowledge)
+
+/** pgvector's `vector(n)`: numbers in, numbers out (the wire format is "[1,2,3]"). */
+export const vector = customType<{ data: number[]; driverData: string; config: { dimensions: number } }>({
+  dataType: (config) => `vector(${config?.dimensions ?? 1024})`,
+  toDriver: (v) => `[${v.join(',')}]`,
+  fromDriver: (v) => (typeof v === 'string' ? (JSON.parse(v) as number[]) : (v as unknown as number[])),
+});
+
+export const verifications = pgTable('verifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  nodeId: uuid('node_id').notNull(),
+  actionId: uuid('action_id'),
+  agentId: uuid('agent_id'),
+  toolId: text('tool_id').notNull(),
+  phase: text('phase').notNull(),
+  checksJson: jsonb('checks_json').notNull(),
+  outcome: text('outcome').notNull(),
+  failedCheck: text('failed_check'),
+  riskTier: text('risk_tier'),
+  durationMs: integer('duration_ms'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const groundednessFindings = pgTable('groundedness_findings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  verificationId: uuid('verification_id').notNull(),
+  claimText: text('claim_text').notNull(),
+  claimKind: text('claim_kind').notNull(),
+  field: text('field'),
+  verdict: text('verdict').notNull(),
+  supported: boolean('supported').notNull(),
+  sourceIds: text('source_ids').array().notNull().default(sql`'{}'::text[]`),
+  confidence: numeric('confidence', { mode: 'number' }).notNull(),
+  severity: text('severity').notNull(),
+});
+
+export const memories = pgTable('memories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  scope: text('scope').notNull(),
+  subjectId: uuid('subject_id').notNull(),
+  class: text('class').notNull(),
+  content: text('content').notNull(),
+  embedding: vector('embedding', { dimensions: 1024 }),
+  provenanceJson: jsonb('provenance_json').notNull(),
+  sourceTaint: text('source_taint').notNull(),
+  confidence: numeric('confidence', { mode: 'number' }).notNull().default(0.5),
+  createdFromRun: uuid('created_from_run'),
+  createdBy: uuid('created_by'),
+  validFrom: timestamp('valid_from', { withTimezone: true }).notNull().defaultNow(),
+  validTo: timestamp('valid_to', { withTimezone: true }),
+  supersededBy: uuid('superseded_by'),
+  userEdited: boolean('user_edited').notNull().default(false),
+  pinned: boolean('pinned').notNull().default(false),
+  stale: boolean('stale').notNull().default(false),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  useCount: integer('use_count').notNull().default(0),
+});
+
+export const memoryConflicts = pgTable('memory_conflicts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  existingId: uuid('existing_id').notNull(),
+  proposedJson: jsonb('proposed_json').notNull(),
+  similarity: numeric('similarity', { mode: 'number' }),
+  detectedAt: timestamp('detected_at', { withTimezone: true }).notNull().defaultNow(),
+  resolution: text('resolution'),
+  resolvedBy: uuid('resolved_by'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+});
+
+export const kbDocuments = pgTable('kb_documents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  workspaceId: uuid('workspace_id'),
+  sourceKind: text('source_kind').notNull(),
+  externalRef: text('external_ref'),
+  title: text('title').notNull(),
+  contentRef: text('content_ref').notNull(),
+  contentDigest: text('content_digest').notNull(),
+  mime: text('mime').notNull(),
+  sensitivity: integer('sensitivity').notNull().default(0),
+  labels: text('labels').array().notNull().default(sql`'{}'::text[]`),
+  taint: text('taint').notNull().default('ORG'),
+  aclRef: text('acl_ref').notNull(),
+  aclUsers: uuid('acl_users').array().notNull().default(sql`'{}'::uuid[]`),
+  createdBy: uuid('created_by'),
+  indexedAt: timestamp('indexed_at', { withTimezone: true }),
+  state: text('state').notNull().default('pending'),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const kbChunks = pgTable('kb_chunks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  documentId: uuid('document_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  content: text('content').notNull(),
+  headingPath: text('heading_path').array().notNull().default(sql`'{}'::text[]`),
+  embedding: vector('embedding', { dimensions: 1024 }),
+  tokenCount: integer('token_count').notNull(),
+});
+
+export const retrievals = pgTable('retrievals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id'),
+  purpose: text('purpose').notNull().default('planning'),
+  requestedBy: uuid('requested_by'),
+  query: text('query').notNull(),
+  chunkIds: uuid('chunk_ids').array().notNull(),
+  memoryIds: uuid('memory_ids').array().notNull(),
+  scoresJson: jsonb('scores_json').notNull().default([]),
+  aclFiltered: integer('acl_filtered').notNull(),
+  sensitivityFiltered: integer('sensitivity_filtered').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -966,6 +1091,13 @@ export const TENANT_SCOPED_TABLES = [
   'approval_quality',
   'webauthn_credentials',
   'webauthn_challenges',
+  'verifications',
+  'groundedness_findings',
+  'memories',
+  'memory_conflicts',
+  'kb_documents',
+  'kb_chunks',
+  'retrievals',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

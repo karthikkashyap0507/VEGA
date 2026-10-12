@@ -41,3 +41,26 @@ export async function evidenceTenantBySlug(slug: string): Promise<string | null>
   return rows[0]?.tenant_id ?? null;
 }
 
+/** Module 8: approval requests not yet notified or batched (the dispatcher's work). */
+export async function schedApprovalsUndispatched(limit: number): Promise<Array<{ tenantId: string; requestId: string }>> {
+  const { rows } = await getAppPool().query<{ tenant_id: string; request_id: string }>('SELECT * FROM sched_approvals_undispatched($1)', [limit]);
+  return rows.map((r) => ({ tenantId: r.tenant_id, requestId: r.request_id }));
+}
+
+/** Module 8: review-moment batches whose time has come. */
+export async function schedApprovalBatchesDue(now: Date): Promise<Array<{ tenantId: string; batchId: string }>> {
+  const { rows } = await getAppPool().query<{ tenant_id: string; batch_id: string }>('SELECT * FROM sched_approval_batches_due($1)', [now]);
+  return rows.map((r) => ({ tenantId: r.tenant_id, batchId: r.batch_id }));
+}
+
+/** Module 8: tenants with approval decisions in the last 30 days (the rubber-stamp job). */
+export async function schedApprovalTenants(): Promise<string[]> {
+  const { rows } = await getAppPool().query<{ tenant_id: string }>('SELECT * FROM sched_approval_tenants()');
+  return rows.map((r) => r.tenant_id);
+}
+
+/** Module 8: one-tap reject from a push — the capability's SHA-256 → its tenant and request. */
+export async function approvalByRejectToken(hash: string): Promise<{ tenantId: string; requestId: string } | null> {
+  const { rows } = await getAppPool().query<{ tenant_id: string; request_id: string }>('SELECT * FROM approval_by_reject_token($1)', [hash]);
+  return rows[0] ? { tenantId: rows[0].tenant_id, requestId: rows[0].request_id } : null;
+}

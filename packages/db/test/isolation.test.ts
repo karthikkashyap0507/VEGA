@@ -76,6 +76,13 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'approval_quality', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'webauthn_credentials', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'webauthn_challenges', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'verifications', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'groundedness_findings', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'memories', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'memory_conflicts', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'kb_documents', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'kb_chunks', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'retrievals', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
 ];
 
 let appPool: pg.Pool;

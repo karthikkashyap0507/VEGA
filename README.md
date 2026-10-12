@@ -28,7 +28,7 @@ how every acceptance criterion is proven.
 | 6 | Reversibility: compensators, holds, undo | [record](docs/module6-implementation.md) ✅ |
 | 7 | Evidence plane: signed chain, packs, replay, verifier | [record](docs/module7-implementation.md) ✅ |
 | 8 | Approval, escalation & Action Center | [record](docs/module8-implementation.md) ✅ |
-| 9 | Verification, memory & knowledge | |
+| 9 | Verification, memory & knowledge | [record](docs/module9-implementation.md) ✅ |
 | 10 | Earned autonomy, contention & enterprise scale | |
 
 ---

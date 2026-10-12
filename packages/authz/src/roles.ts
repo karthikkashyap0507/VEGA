@@ -42,6 +42,7 @@ export const CAPABILITIES = [
   'agents.run',
   'connectors.read',
   'connectors.manage',
+  'knowledge.manage',
   'policy.read',
   'policy.manage',
   'budgets.manage',

@@ -37,6 +37,8 @@ export interface PacketInput {
   provenance: { argTaint: string; argTaints: Array<{ path: string; taint: string; dataTaint: string; sourceIds: readonly string[] }> };
   risk: { score: number | null; tier: string | null; factors?: Record<string, number> | null } | null;
   policy: { decision: string; decidedBy: string | null; reason: string | null; citation: string | null; chain: Array<{ step: string; detail: string; id?: string; version?: number; citation?: string | null }> };
+  /** Module 9: the pre-commit checks and the claims no trusted source supports. */
+  verification?: { outcome: string; checks: Array<{ check: string; outcome: string; detail: string }>; unsupportedClaims: Array<{ text: string; reason: string }> } | undefined;
 }
 
 export interface DecisionPacket {
@@ -55,6 +57,8 @@ export interface DecisionPacket {
   policy: { decision: string; id: string | null; citation: string | null; reason: string | null; reason_chain: Array<{ step: string; detail: string }> };
   routing: { approver_role: string; approvals_required: number; separation_of_duties: boolean };
   recommended: 'approve' | 'reject';
+  /** Module 9 (present only when verification ran): the §8.3 panel, one line per check. */
+  verification?: { outcome: string; checks: Array<{ check: string; outcome: string; detail: string }> };
   if_you_do_nothing: { at: string; fallback: Fallback; outcome: string };
   actions: string[];
 }
@@ -120,8 +124,8 @@ export function renderPacket(i: PacketInput): { packet: DecisionPacket; digest: 
     evidence: {
       sources: [...sources].map(([id, s]) => ({ id, taint: s.taint, fields: [...s.fields].sort() })).sort((a, b) => (a.id < b.id ? -1 : 1)),
       untrusted_fields: untrusted,
-      // Module 9 (verification) fills this; the field is part of the packet from the first version.
-      unsupported_claims: [],
+      // Module 9: the claims verification could not ground in a trusted source, highlighted.
+      unsupported_claims: [...(i.verification?.unsupportedClaims ?? [])],
       provenance_ref: `/runs/${i.run.id}`,
       content: i.action.args,
     },
@@ -134,7 +138,8 @@ export function renderPacket(i: PacketInput): { packet: DecisionPacket; digest: 
       reason_chain: i.policy.chain.map((s) => ({ step: s.step, detail: s.detail })),
     },
     routing: { approver_role: i.request.approverRole, approvals_required: i.request.approvalsRequired, separation_of_duties: i.request.separationOfDuties },
-    recommended: i.risk?.tier === 'CRITICAL' ? 'reject' : 'approve',
+    recommended: i.risk?.tier === 'CRITICAL' || i.verification?.checks.some((c) => c.outcome === 'ESCALATE' && c.check === 'groundedness') ? 'reject' : 'approve',
+    ...(i.verification ? { verification: { outcome: i.verification.outcome, checks: i.verification.checks.map((c) => ({ check: c.check, outcome: c.outcome, detail: c.detail })) } } : {}),
     if_you_do_nothing: { at: i.request.expiresAt, fallback: i.request.fallback, outcome: outcomeIfNothing(i.request.fallback, i.request.fallbackRole, i.request.toolId) },
     actions: ['approve', 'approve_with_edits', 'reject', 'question'],
   };
