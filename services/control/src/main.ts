@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { createLogger, internalServerTls, loadTls, mtlsFetch, startHealthServer } from '@vega/shared';
+import { BRAND, createLogger, internalServerTls, loadTls, mtlsFetch, startHealthServer } from '@vega/shared';
 import { PgTokenVault, sandboxFetch } from '@vega/connector-sdk';
 import { safePost } from '@vega/connector-web';
 import { AnthropicClient } from '@vega/llm';
@@ -22,6 +22,8 @@ import { InMemoryIdentityAdmin, loadKeyFile, PrincipalAssertionVerifier, Zitadel
 import { initTelemetry } from '@vega/telemetry';
 import { buildControlApp } from './app.js';
 import { EvidenceClient } from './evidence/client.js';
+import { ApprovalService } from './approvals/service.js';
+import { ApprovalDispatcher, logMailer, ntfyApprovalNotifier } from './approvals/dispatcher.js';
 
 /**
  * Control-plane process. Loud about every development shortcut it takes: module1 plan,
@@ -190,8 +192,28 @@ const evidence = evidenceQueryToken
   ? new EvidenceClient({ baseUrl: env['EVIDENCE_QUERY_URL'] ?? 'http://localhost:3008', appendUrl: env['EVIDENCE_URL'] ?? 'http://localhost:3004', queryToken: evidenceQueryToken, appendToken: env['EVIDENCE_CONTROL_APPEND_TOKEN'], ...(tls ? { fetchImpl: mtlsFetch(tls) } : {}) })
   : undefined;
 
+// Module 8: approvals — decided here, under the rules; the run is woken through the execution API.
+const webUrl = env['WEB_PUBLIC_URL'] ?? 'http://localhost:3000';
+const approvals = new ApprovalService({
+  logger,
+  evidence,
+  waker: agent ? { wake: async (w) => agent.core.execution.signalRun({ tenantId: w.tenantId, runId: w.runId, topic: 'decision', message: { key: w.key, decision: w.decision, by: w.by } }) } : undefined,
+  webauthn: { rpId: new URL(webUrl).hostname, origin: new URL(webUrl).origin, rpName: BRAND.name },
+});
+const dispatcher = new ApprovalDispatcher({
+  store: approvals.store,
+  notifier: env['NTFY_URL'] ? ntfyApprovalNotifier(env['NTFY_URL']) : undefined,
+  mailer: logMailer(logger),
+  pushSecret: env['PUSH_TOPIC_SECRET'],
+  webUrl,
+  gatewayUrl: env['GATEWAY_PUBLIC_URL'] ?? 'http://localhost:3001',
+  logger,
+});
+if (!env['NTFY_URL']) logger.warn('NTFY_URL unset: approvals are batched and counted against the budget, but no push is sent');
+dispatcher.start(Number(env['APPROVAL_DISPATCH_INTERVAL_MS'] ?? 30_000));
+
 const app = await buildControlApp({
-  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility, ...(evidence ? { evidence } : {}) },
+  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility, ...(evidence ? { evidence } : {}), approvals },
   verifier,
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });

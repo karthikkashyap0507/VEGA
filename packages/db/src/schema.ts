@@ -1,12 +1,14 @@
 import {
   bigint,
   bigserial,
+  date,
   boolean,
   customType,
   inet,
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   primaryKey,
   text,
@@ -757,6 +759,161 @@ export const incidents = pgTable('incidents', {
   resolution: text('resolution'),
 });
 
+
+// ------------------------------------------------------------------ Module 8 (0011_approvals)
+
+export const approvalRequests = pgTable('approval_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  nodeId: uuid('node_id').notNull(),
+  actionId: uuid('action_id'),
+  approvalKey: text('approval_key').notNull(),
+  toolId: text('tool_id').notNull(),
+  requester: uuid('requester').notNull(),
+  approverRole: text('approver_role').notNull(),
+  assignedTo: uuid('assigned_to'),
+  delegatedFrom: uuid('delegated_from'),
+  escalationLevel: integer('escalation_level').notNull().default(0),
+  escalateAt: timestamp('escalate_at', { withTimezone: true }),
+  packetJson: jsonb('packet_json').notNull(),
+  packetDigest: text('packet_digest').notNull(),
+  riskTier: text('risk_tier'),
+  urgency: text('urgency').notNull().default('normal'),
+  batchId: uuid('batch_id'),
+  notifiedAt: timestamp('notified_at', { withTimezone: true }),
+  requiresDual: boolean('requires_dual').notNull().default(false),
+  approvalsRequired: integer('approvals_required').notNull().default(1),
+  separationOfDuties: boolean('separation_of_duties').notNull().default(false),
+  approvedBy: uuid('approved_by').array().notNull().default(sql`'{}'::uuid[]`),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  fallback: text('fallback').notNull(),
+  fallbackRole: text('fallback_role'),
+  questionAskedAt: timestamp('question_asked_at', { withTimezone: true }),
+  rejectTokenHash: text('reject_token_hash'),
+  editedArgs: jsonb('edited_args'),
+  editDiff: jsonb('edit_diff'),
+  state: text('state').notNull().default('pending'),
+  resolution: text('resolution'),
+  resolvedBy: text('resolved_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+});
+
+export const approvalDecisions = pgTable('approval_decisions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  requestId: uuid('request_id').notNull(),
+  runId: uuid('run_id').notNull(),
+  actionId: uuid('action_id'),
+  toolId: text('tool_id').notNull(),
+  approverId: uuid('approver_id'),
+  approverRole: text('approver_role'),
+  decision: text('decision').notNull(),
+  reason: text('reason'),
+  edited: boolean('edited').notNull().default(false),
+  editDiffJson: jsonb('edit_diff_json'),
+  latencyMs: integer('latency_ms').notNull(),
+  evidenceOpened: boolean('evidence_opened').notNull(),
+  evidenceDwellMs: integer('evidence_dwell_ms'),
+  surface: text('surface').notNull(),
+  packetDigest: text('packet_digest').notNull(),
+  packetChars: integer('packet_chars').notNull(),
+  riskTier: text('risk_tier'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const approvalViews = pgTable('approval_views', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  requestId: uuid('request_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  kind: text('kind').notNull(),
+  dwellMs: integer('dwell_ms'),
+  surface: text('surface').notNull().default('web'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const approvalBatches = pgTable('approval_batches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  itemCount: integer('item_count').notNull().default(0),
+  state: text('state').notNull().default('accumulating'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const notificationBudget = pgTable(
+  'notification_budget',
+  {
+    tenantId: uuid('tenant_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    day: date('day').notNull(),
+    sent: integer('sent').notNull().default(0),
+    budget: integer('budget').notNull().default(12),
+    overflow: integer('overflow').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.userId, t.day] })],
+);
+
+export const delegations = pgTable('delegations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  fromUser: uuid('from_user').notNull(),
+  toUser: uuid('to_user').notNull(),
+  roleScope: text('role_scope'),
+  startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+  endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+  reason: text('reason'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const approvalQuality = pgTable('approval_quality', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  approverId: uuid('approver_id').notNull(),
+  windowStart: date('window_start').notNull(),
+  decisions: integer('decisions').notNull(),
+  medianLatencyMs: integer('median_latency_ms').notNull(),
+  p10LatencyMs: integer('p10_latency_ms').notNull(),
+  evidenceOpenRate: numeric('evidence_open_rate', { mode: 'number' }).notNull(),
+  highEvidenceOpenRate: numeric('high_evidence_open_rate', { mode: 'number' }),
+  editRate: numeric('edit_rate', { mode: 'number' }).notNull(),
+  rejectRate: numeric('reject_rate', { mode: 'number' }).notNull(),
+  tooFastRate: numeric('too_fast_rate', { mode: 'number' }).notNull(),
+  flag: text('flag'),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const webauthnCredentials = pgTable('webauthn_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  credentialId: text('credential_id').notNull(),
+  publicKey: text('public_key').notNull(),
+  counter: bigint('counter', { mode: 'number' }).notNull().default(0),
+  transports: text('transports').array().notNull().default(sql`'{}'::text[]`),
+  label: text('label'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+});
+
+export const webauthnChallenges = pgTable('webauthn_challenges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  purpose: text('purpose').notNull(),
+  challenge: text('challenge').notNull(),
+  requestId: uuid('request_id'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -800,6 +957,15 @@ export const TENANT_SCOPED_TABLES = [
   'divergences',
   'undo_metrics',
   'incidents',
+  'approval_requests',
+  'approval_decisions',
+  'approval_views',
+  'approval_batches',
+  'notification_budget',
+  'delegations',
+  'approval_quality',
+  'webauthn_credentials',
+  'webauthn_challenges',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

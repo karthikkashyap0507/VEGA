@@ -29,6 +29,13 @@ export interface RunCheckpoint {
   released?: string[] | undefined;
   /** Module 6 edit and requeue: original call key → the hold whose edited content replaces it. */
   edits?: Record<string, string> | undefined;
+  /**
+   * Module 8: how each approved call was approved — the request, who, the digest of the packet they
+   * saw (→ the receipt's evidence_digest) and the risk tier they approved at.
+   */
+  approvalInfo?: Record<string, { requestId: string; by: string[]; packetDigest: string; tier: string | null; via: string }> | undefined;
+  /** Module 8 approve-with-edits: original call key → the request whose edited arguments replace it. */
+  approvalEdits?: Record<string, { requestId: string; tier: string | null }> | undefined;
   /** Verified claims of the latest run token (never the token itself). */
   grant?: Grant | undefined;
   answers?: Array<{ field: string; choice: string; by: string; at: string }> | undefined;

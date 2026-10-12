@@ -18,6 +18,7 @@ import type { AgentCoreDeps, RunCoordinator } from './agent/coordinator.js';
 import type { PolicyPublisher } from './policy/publisher.js';
 import type { ReversibilityStore } from '@vega/compensators';
 import type { EvidenceClient } from './evidence/client.js';
+import type { ApprovalService } from './approvals/service.js';
 
 /**
  * Control-plane RPC.
@@ -44,6 +45,8 @@ export interface ControlDeps {
   reversibility?: { store: ReversibilityStore; cache?: FastRevokeLookup | undefined; pushSecret?: string | undefined };
   /** Module 7: the evidence plane's query door (and the control plane's own append). Absent: 503. */
   evidence?: EvidenceClient | undefined;
+  /** Module 8: approval requests (decide-time authorization, packets, corpus, mobile step-up). Absent: 503. */
+  approvals?: ApprovalService | undefined;
 }
 
 /** The read half of the fast revoke path (execution writes it when a hold opens). */
@@ -231,6 +234,12 @@ export const webhookProcedure = t.procedure.use(async ({ ctx, next }) => {
 export const holdRevokeProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (ctx.principal?.system !== 'hold_revoke') throw new ProblemError(problems.forbidden('hold revoke principal required'));
   return next({ ctx: { ...ctx, log: ctx.deps.logger.child({ system: 'hold_revoke' }) } });
+});
+
+/** Module 8: the one-tap REJECT from a push (a capability for one approval; no session). */
+export const approvalRejectProcedure = t.procedure.use(async ({ ctx, next }) => {
+  if (ctx.principal?.system !== 'approval_reject') throw new ProblemError(problems.forbidden('approval reject principal required'));
+  return next({ ctx: { ...ctx, log: ctx.deps.logger.child({ system: 'approval_reject' }) } });
 });
 
 /** Module 7: the published keys and anchors — the gateway's unauthenticated `.well-known` routes. */

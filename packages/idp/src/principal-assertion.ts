@@ -45,7 +45,7 @@ export interface PrincipalClaims {
    * `hold_revoke` (Module 6): the one-tap revoke from a push notification — no session, only a
    * capability that can stop exactly one held action.
    */
-  system?: 'signup' | 'webhook' | 'hold_revoke' | 'evidence_public';
+  system?: 'signup' | 'webhook' | 'hold_revoke' | 'evidence_public' | 'approval_reject';
 }
 
 /** Sentinel ids for system principals. Never valid uuids, so withTenant refuses them. */
@@ -142,7 +142,7 @@ export class PrincipalAssertionVerifier {
       userId: payload.sub,
       ...(typeof payload['sid'] === 'string' ? { sessionId: payload['sid'] } : {}),
       ...(typeof payload['trc'] === 'string' ? { traceId: payload['trc'] } : {}),
-      ...(payload['sys'] === 'signup' || payload['sys'] === 'webhook' || payload['sys'] === 'hold_revoke' || payload['sys'] === 'evidence_public' ? { system: payload['sys'] as 'signup' | 'webhook' | 'hold_revoke' | 'evidence_public' } : {}),
+      ...(payload['sys'] === 'signup' || payload['sys'] === 'webhook' || payload['sys'] === 'hold_revoke' || payload['sys'] === 'evidence_public' || payload['sys'] === 'approval_reject' ? { system: payload['sys'] as 'signup' | 'webhook' | 'hold_revoke' | 'evidence_public' | 'approval_reject' } : {}),
     };
   }
 }

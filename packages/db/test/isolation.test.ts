@@ -67,6 +67,15 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'divergences', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
   { table: 'undo_metrics', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
   { table: 'incidents', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'approval_requests', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'approval_decisions', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'approval_views', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'approval_batches', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'notification_budget', idColumn: 'user_id', tenantColumn: 'tenant_id' },
+  { table: 'delegations', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'approval_quality', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'webauthn_credentials', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'webauthn_challenges', idColumn: 'id', tenantColumn: 'tenant_id' },
 ];
 
 let appPool: pg.Pool;

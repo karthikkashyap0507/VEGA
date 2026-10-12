@@ -5,6 +5,7 @@ import type { DurableContext } from '@vega/orchestration';
 import { TransitionError, type LoadedRun } from '@vega/runs';
 import { DurablePass, type CommittedFact, type ExecutorDeps, type PendingAction } from './pass.js';
 import { programBlastRadius } from '../reversibility/blast.js';
+import type { SettledApproval } from '../approvals/orchestrator.js';
 
 /**
  * THE RUN WORKFLOW — one durable workflow per run (docs/module4.md §5.3; engine: DBOS, D-13).
@@ -202,6 +203,52 @@ export function runWorkflow(deps: ExecutorDeps) {
         const pending = suspension.pending;
         const t = await transition(`approval:${passNo}`, 'AWAITING_APPROVAL', { reason: pending.reason, pending });
         if (!t.ok) return { status: t.from };
+
+        // Module 8: the approval is a ROW (like M6's hold). Open it — packet rendered and hashed,
+        // approver routed, expiry and fallback declared — then wait on it. A person's decision
+        // (control plane, checked at decide time) or the timers below settle it; a message only
+        // wakes us early. Whichever commits first is what happened, across restarts.
+        const orch = deps.approvals;
+        if (orch && pending.key && pending.nodeRowId) {
+          const title = decls.find(([id]) => id === pending.toolId)?.[1].title ?? pending.toolId ?? 'action';
+          let req = await ctx.step(`approval:${passNo}:open`, () => orch.open({ run, pending, toolTitle: title }), { retries: 5 });
+          await ctx.step(`approval:${passNo}:pending`, () => deps.store.setStatus(tenantId, runId, 'AWAITING_APPROVAL', { pending: { ...pending, approvalRequestId: req.id, expiresAt: req.expiresAt } }).catch(() => undefined), { retries: 3 });
+          let settled: SettledApproval | null = null;
+          for (let i = 0; i < 200 && !settled; i++) {
+            const wakeAt = Math.min(Date.parse(req.expiresAt), req.escalateAt ? Date.parse(req.escalateAt) : Infinity);
+            await ctx.recv<DecisionMessage>(TOPICS.decision, Math.max(0.05, (wakeAt - (await ctx.now())) / 1000));
+            const s = await ctx.step(`approval:${passNo}:settle:${i}`, () => orch.settle(tenantId, req.id, run, pending, title), { retries: 5 });
+            if (s.id !== req.id || s.state === 'pending') {
+              if (s.id !== req.id) await ctx.step(`approval:${passNo}:superseded:${i}`, () => deps.store.setStatus(tenantId, runId, 'AWAITING_APPROVAL', { pending: { ...pending, approvalRequestId: s.id, expiresAt: s.expiresAt } }).catch(() => undefined), { retries: 3 });
+              req = s;
+              continue;
+            }
+            settled = s;
+          }
+          if (!settled || settled.state !== 'approved') {
+            const why = !settled ? 'the approval could not be settled' : settled.resolution?.startsWith('fallback:') ? `no decision before it expired; fallback ${settled.resolution.slice(9)} applied` : settled.state === 'rejected' ? 'rejected by the approver' : `the approval was ${settled.state}`;
+            if (pending.nodeRowId) await ctx.step(`reject:${passNo}`, () => deps.store.markNode(tenantId, runId, pending.nodeRowId!, { status: 'skipped', error: { code: settled?.state === 'rejected' ? 'REJECTED' : 'APPROVAL_EXPIRED', by: settled?.resolvedBy ?? null, requestId: settled?.id ?? req.id }, end: true }));
+            return end(`rejected:${passNo}`, 'CANCELLED', why, { actorId: settled?.state === 'rejected' ? settled.resolvedBy : null });
+          }
+          const key = pending.key;
+          const approved = settled;
+          approvals.add(key);
+          await ctx.step(
+            `approved:${passNo}`,
+            () =>
+              deps.store.updateCheckpoint(tenantId, runId, (cp) => ({
+                ...cp,
+                approvals: [...new Set([...cp.approvals, key])],
+                approvalInfo: { ...(cp.approvalInfo ?? {}), [key]: { requestId: approved.id, by: approved.approvedBy, packetDigest: approved.packetDigest, tier: approved.tier, via: approved.resolution ?? 'decided' } },
+                // §8.3: edited arguments replace the call's; policy decides the edited call again.
+                ...(approved.editedArgs ? { approvalEdits: { ...(cp.approvalEdits ?? {}), [key]: { requestId: approved.id, tier: approved.tier } } } : {}),
+              })),
+            { retries: 5 },
+          );
+          deps.log.info({ run_id: runId, key, by: approved.approvedBy, edited: Boolean(approved.editedArgs) }, 'action approved; resuming');
+          continue;
+        }
+
         let decision: DecisionMessage | null = null;
         // A decision names the exact call it approves (version, call, argument digest). Anything
         // else is stale — e.g. a double-click on an approval for an earlier plan — and ignored.

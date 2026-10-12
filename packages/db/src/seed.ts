@@ -232,6 +232,29 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
       await client.query(`INSERT INTO undo_metrics (tenant_id, run_id, tool_id, kind, channel, requested_at, succeeded) VALUES ($1, $2, 'gmail.send', 'revoke', 'app', now(), true)`, [tenantId, run.rows[0]!.id]);
       await client.query(`INSERT INTO incidents (tenant_id, kind, severity, title, run_id) VALUES ($1, 'compensation_failed', 'HIGH', 'seed', $2)`, [tenantId, run.rows[0]!.id]);
 
+      // Module 8: one of everything the approval layer writes.
+      const req = await client.query<{ id: string }>(
+        `INSERT INTO approval_requests (tenant_id, run_id, node_id, approval_key, tool_id, requester, approver_role, packet_json, packet_digest, expires_at, fallback, state)
+         VALUES ($1, $2, $3, 'seed-' || gen_random_uuid(), 'gmail.send', $4, 'APPROVER', '{}', 'sha256:seed', now() + interval '1 hour', 'AUTO_REJECT', 'approved') RETURNING id`,
+        [tenantId, run.rows[0]!.id, node.rows[0]!.id, userId],
+      );
+      await client.query(
+        `INSERT INTO approval_decisions (tenant_id, request_id, run_id, tool_id, approver_id, decision, latency_ms, evidence_opened, surface, packet_digest, packet_chars)
+         VALUES ($1, $2, $3, 'gmail.send', $4, 'approve', 8400, true, 'web', 'sha256:seed', 400)`,
+        [tenantId, req.rows[0]!.id, run.rows[0]!.id, userId],
+      );
+      await client.query(`INSERT INTO approval_views (tenant_id, request_id, user_id, kind, dwell_ms) VALUES ($1, $2, $3, 'evidence', 3000)`, [tenantId, req.rows[0]!.id, userId]);
+      await client.query(`INSERT INTO approval_batches (tenant_id, user_id, scheduled_at, state) VALUES ($1, $2, now(), 'delivered')`, [tenantId, userId]);
+      await client.query(`INSERT INTO notification_budget (tenant_id, user_id, day) VALUES ($1, $2, current_date) ON CONFLICT DO NOTHING`, [tenantId, userId]);
+      const deputy = await client.query<{ id: string }>(`INSERT INTO users (tenant_id, email, display_name, role, status) VALUES ($1, $2, 'Deputy', 'APPROVER', 'active') ON CONFLICT ON CONSTRAINT users_email_unique_per_tenant DO UPDATE SET display_name = EXCLUDED.display_name RETURNING id`, [tenantId, `deputy-${key}-${tenantId.slice(0, 8)}@example.com`]);
+      await client.query(`INSERT INTO delegations (tenant_id, from_user, to_user, starts_at, ends_at, reason) VALUES ($1, $2, $3, now(), now() + interval '7 days', 'seed')`, [tenantId, userId, deputy.rows[0]!.id]);
+      await client.query(
+        `INSERT INTO approval_quality (tenant_id, approver_id, window_start, decisions, median_latency_ms, p10_latency_ms, evidence_open_rate, edit_rate, reject_rate, too_fast_rate) VALUES ($1, $2, current_date, 1, 8400, 8400, 1, 0, 0, 0) ON CONFLICT DO NOTHING`,
+        [tenantId, userId],
+      );
+      await client.query(`INSERT INTO webauthn_credentials (tenant_id, user_id, credential_id, public_key) VALUES ($1, $2, 'seed-' || gen_random_uuid(), 'seed')`, [tenantId, userId]);
+      await client.query(`INSERT INTO webauthn_challenges (tenant_id, user_id, purpose, challenge, expires_at) VALUES ($1, $2, 'register', 'seed', now())`, [tenantId, userId]);
+
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;
       made['workspace' + key] = workspaceId;

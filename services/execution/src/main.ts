@@ -20,6 +20,7 @@ import { DbosOrchestrator } from '@vega/orchestration';
 import { RunStore } from '@vega/runs';
 import { buildExecutionApp } from './app.js';
 import { EvidenceAppendClient } from './evidence-append.js';
+import { ApprovalOrchestrator } from './approvals/orchestrator.js';
 import { executionHooks, programReceipt, RUN_WORKFLOW, runWorkflow, type RunTokenCheck } from './executor/index.js';
 import { policyEngineFromEnv } from './policy/index.js';
 import { RuntimeDeclarations } from './programs.js';
@@ -155,6 +156,8 @@ if (orchestrator && internalToken) {
       pager,
       requireGrant: true,
       programReceipt: programReceipt(evidence),
+      // Module 8: approvals are rows — routed, packeted, hashed, expiring into a declared fallback.
+      approvals: new ApprovalOrchestrator({ audit: evidence ? { append: async (e) => void (await evidence.append(e)) } : undefined }),
       reversibility,
     }),
   );

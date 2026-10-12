@@ -20,6 +20,7 @@ import { registerRunRoutes } from './routes/runs.js';
 import { registerPolicyRoutes } from './routes/policies.js';
 import { registerReversibilityRoutes } from './routes/reversibility.js';
 import { registerEvidenceRoutes } from './routes/evidence.js';
+import { registerApprovalRoutes } from './routes/approvals.js';
 import { registerResourceRoutes } from './routes/resources.js';
 import { registerSystemRoutes } from './routes/system.js';
 
@@ -299,6 +300,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   registerPolicyRoutes(app, hooks, deps);
   registerReversibilityRoutes(app, hooks, deps);
   registerEvidenceRoutes(app, hooks, deps);
+  registerApprovalRoutes(app, hooks, deps);
 
   return app;
 }

@@ -15,7 +15,7 @@
 
 ## Status
 
-Modules 1–7 of 10 are complete. Each module's implementation record says where the code is and
+Modules 1–8 of 10 are complete. Each module's implementation record says where the code is and
 how every acceptance criterion is proven.
 
 | Module | | Record |
@@ -27,7 +27,7 @@ how every acceptance criterion is proven.
 | 5 | Policy, risk & data classification | [record](docs/module5-implementation.md) ✅ |
 | 6 | Reversibility: compensators, holds, undo | [record](docs/module6-implementation.md) ✅ |
 | 7 | Evidence plane: signed chain, packs, replay, verifier | [record](docs/module7-implementation.md) ✅ |
-| 8 | Approval, escalation & Action Center | |
+| 8 | Approval, escalation & Action Center | [record](docs/module8-implementation.md) ✅ |
 | 9 | Verification, memory & knowledge | |
 | 10 | Earned autonomy, contention & enterprise scale | |
 

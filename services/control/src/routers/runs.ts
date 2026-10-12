@@ -187,6 +187,8 @@ export const runsRouter = router({
     } catch (e) {
       return refusal(e);
     }
+    // Module 8: a cancelled run's approval stops waiting for anyone.
+    await ctx.deps.approvals?.store.cancelPending(run.tenantId, run.id, 'run cancelled').catch(() => undefined);
     return (await core.store.view(run.tenantId, run.id))!;
   }),
 
@@ -238,6 +240,22 @@ export const runsRouter = router({
       policy?: { approverRole?: string | null; separationOfDuties?: boolean };
     } | null;
     if (run.status !== 'AWAITING_APPROVAL' || pending?.kind !== 'approval' || !pending.key) throw new ProblemError(problems.preconditionFailed('this run is not waiting for an approval'));
+    // Module 8: the approval is a request with a packet. Decide it there — same rules, same
+    // telemetry, same receipt — whichever surface the person used.
+    const requestId = (pending as { approvalRequestId?: string }).approvalRequestId;
+    if (requestId && ctx.deps.approvals) {
+      const req = await ctx.deps.approvals.store.get(run.tenantId, requestId);
+      if (req) {
+        try {
+          await ctx.deps.approvals.decide({ tenantId: ctx.principal.tenantId, userId: ctx.principal.userId, role: ctx.principal.role }, requestId, { decision: input.decision, packetDigest: req.packetDigest, ...(input.note ? { reason: input.note } : {}) });
+        } catch (e) {
+          const err = e as { status?: number; message?: string };
+          if (err.status) throw new ProblemError({ type: err.status === 403 ? 'https://errors.vega.dev/forbidden' : 'https://errors.vega.dev/precondition-failed', title: 'Refused', status: err.status, detail: err.message ?? '' });
+          throw e;
+        }
+        return (await agentCore(ctx).core.store.view(run.tenantId, run.id))!;
+      }
+    }
     const own = run.principalUserId === ctx.principal.userId;
     const role = pending.policy?.approverRole ?? null;
     if (input.decision === 'reject') {

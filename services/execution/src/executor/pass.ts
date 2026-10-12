@@ -19,6 +19,7 @@ import {
 } from '@vega/interpreter';
 import type { JournalRow, LoadedRun, RunStore } from '@vega/runs';
 import type { ReversibilityEngine } from '../reversibility/engine.js';
+import type { ApprovalOrchestrator } from '../approvals/orchestrator.js';
 import type { TaintLevel as Taint } from '@vega/contracts';
 
 /**
@@ -84,6 +85,8 @@ export interface ExecutorDeps {
   reversibility?: ReversibilityEngine | undefined;
   /** Module 7: record a program version in the evidence plane (`run.program`) before its first call. */
   programReceipt?: ((p: ProgramReceipt) => Promise<void>) | undefined;
+  /** Module 8: approval requests (routing, packet, expiry, fallback, escalation). Absent: the bare decision message. */
+  approvals?: ApprovalOrchestrator | undefined;
 }
 
 export interface ProgramReceipt {
@@ -142,6 +145,9 @@ export interface PendingAction {
   edited?: boolean;
   heldAt?: string;
   releaseAt?: string;
+  /** Module 8: the approval request this pause is waiting on, and when it expires. */
+  approvalRequestId?: string;
+  expiresAt?: string;
   assumptions?: string[];
   ambiguity?: Ambiguity;
   connector?: string;
@@ -189,6 +195,7 @@ export interface PassConfig {
 }
 
 const READ = 'R0';
+const TIER_RANK: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
 const isIrreversible = (d: ToolDeclarationRecord) => d.reversibility === 'R2' || d.reversibility === 'R3';
 // Canonical (key-order independent): a journaled result comes back from jsonb with its keys
 // reordered, and must still find the memoized extraction it fed the first time.
@@ -485,11 +492,24 @@ export class DurablePass implements ToolPort {
     // 3 — approval (M8). The gate's REQUIRE_APPROVAL (untrusted content leaving the org) is
     // folded in, and honoured below even if an approval hook were to say PROCEED.
     const needs = (p: PolicyDecision) => p.decision === 'REQUIRE_APPROVAL' || p.decision === 'REQUIRE_DUAL_APPROVAL';
-    const merged: PolicyDecision =
+    const merged0: PolicyDecision =
       inv.gate!.decision === 'REQUIRE_APPROVAL' && !needs(policy)
         ? { ...policy, decision: 'REQUIRE_APPROVAL', reason: inv.gate!.reason ?? 'untrusted content influences this action', approverRole: policy.approverRole ?? null }
         : policy;
-    const approved = approvals.has(key);
+    // M8 §8.3: a call an approver EDITED was decided again just now. It keeps that approval only if
+    // the edit did not raise the risk tier; otherwise it is approved again — an approver pasting
+    // an external recipient into an approved draft never inherits the original approval.
+    const baseKey = `v${version}:${seq}:${d0}`;
+    const editedFrom = d !== d0 ? run.checkpoint.approvalEdits?.[baseKey] : undefined;
+    const tierUp = !!editedFrom && TIER_RANK[policy.riskTier ?? 'CRITICAL']! > TIER_RANK[editedFrom.tier ?? 'LOW']!;
+    // Who receives it is what the taint gate and the policy judged (M6's rule): an edit that ADDS a
+    // recipient is a different action, whatever the score says.
+    const added = editedFrom ? recipientsAdded(decl, inv0.args, inv.args) : [];
+    const carried = !!editedFrom && !tierUp && !added.length;
+    const why = tierUp ? `the edit raised the risk from ${editedFrom!.tier ?? 'unknown'} to ${policy.riskTier ?? 'unknown'}` : `the edit added ${added.length === 1 ? 'a recipient' : 'recipients'} (${added.join(', ')})`;
+    const merged: PolicyDecision = editedFrom && !carried ? { ...merged0, decision: needs(merged0) ? merged0.decision : 'REQUIRE_APPROVAL', reason: `${why}; approve it again — ${merged0.reason ?? ''}`.trim() } : merged0;
+    const approved = approvals.has(key) || carried;
+    const approvalInfo = run.checkpoint.approvalInfo?.[key] ?? (carried ? run.checkpoint.approvalInfo?.[baseKey] : undefined);
     const approval = await hooks.approval(sctx, sim, merged, approved);
     if (approval.decision === 'WAIT' || (needs(merged) && !approved)) {
       if (approval.decision !== 'WAIT') deps.log.error({ run_id: run.id, tool_id: inv.toolId }, 'approval hook returned PROCEED for a call that requires approval; holding it anyway');
@@ -526,7 +546,7 @@ export class DurablePass implements ToolPort {
     const record: ReceiptRecord = {
       policy: merged,
       engineDecision: policy.decision,
-      approval: needs(merged) || approved ? { required: needs(merged), granted: approved, approverRole: merged.approverRole ?? null, by: [] } : null,
+      approval: needs(merged) || approved ? { required: needs(merged), granted: approved, approverRole: merged.approverRole ?? null, by: approvalInfo?.by ?? [], evidenceDigest: approvalInfo?.packetDigest ?? null, requestId: approvalInfo?.requestId ?? null } : null,
       hold: holdMs || policy.decision === 'HOLD' ? { windowMs: holdMs ?? 0, released: released.has(key), revoked: false } : null,
       ...(d !== d0 ? { programArgs: inv0.args } : {}),
       program: { digest: this.cfg.program?.program.digest ?? null, modelId: this.cfg.program?.program.modelId ?? null },
@@ -567,7 +587,14 @@ export class DurablePass implements ToolPort {
    */
   private async effective(inv: ToolInvocation, seq: number, d0: string): Promise<{ inv: ToolInvocation; d: string }> {
     const { run, version, deps } = this.cfg;
-    const holdId = run.checkpoint.edits?.[`v${version}:${seq}:${d0}`];
+    const k = `v${version}:${seq}:${d0}`;
+    // Module 8 §8.3: an approver's edits replace the arguments; the edited call is decided again.
+    const approvedEdit = run.checkpoint.approvalEdits?.[k];
+    if (approvedEdit && deps.approvals) {
+      const editedArgs = await deps.approvals.editedArgs(run.tenantId, approvedEdit.requestId);
+      if (editedArgs) return { inv: { ...inv, args: editedArgs }, d: argsDigest(editedArgs) };
+    }
+    const holdId = run.checkpoint.edits?.[k];
     if (!holdId || !deps.reversibility) return { inv, d: d0 };
     const { editedArgs } = await deps.reversibility.deps.store.openArtifact(run.tenantId, holdId);
     return editedArgs ? { inv: { ...inv, args: editedArgs }, d: argsDigest(editedArgs) } : { inv, d: d0 };
@@ -651,3 +678,19 @@ class CalledError extends Error {
 }
 
 export type { DurableContext };
+
+/** Recipients present in the edited arguments and not in the program's (lower-cased addresses). */
+function recipientsAdded(decl: ToolDeclarationRecord, before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+  const collect = (args: Record<string, unknown>) => {
+    const out = new Set<string>();
+    const take = (v: unknown) => {
+      if (typeof v === 'string') out.add(v.trim().toLowerCase());
+      else if (Array.isArray(v)) v.forEach(take);
+      else if (v && typeof v === 'object') Object.values(v).forEach(take);
+    };
+    for (const path of decl.recipientArgs) take(path.split('.').reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k.replace(/\[\]$/, '')] : undefined), args));
+    return out;
+  };
+  const was = collect(before);
+  return [...collect(after)].filter((r) => !was.has(r)).sort();
+}

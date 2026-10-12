@@ -42,6 +42,12 @@ export const WEBHOOK_EVENT_KINDS = [
   'compensation.succeeded',
   'compensation.failed',
   'divergence.detected',
+  // Module 8 (docs/module8.md §7)
+  'approval.requested',
+  'approval.decided',
+  'approval.expired',
+  'approval.escalated',
+  'approval.quality_flag',
 ] as const;
 
 const endpointView = (e: typeof schema.webhookEndpoints.$inferSelect) => ({

@@ -166,8 +166,10 @@ export function defaultHooks(
     async simulate(ctx) {
       return simulate(ctx);
     },
-    async approval(ctx, _sim, decided, approved) {
-      warn('approvalGate', 'approval routing (Module 8)', ctx);
+    // Module 8 is installed: this gate only says WAIT or PROCEED. Who decides, what they are shown,
+    // when it expires and what happens then is the approval request the run workflow opens
+    // (services/execution/src/approvals) — the decision is committed on that row, not here.
+    async approval(_ctx, _sim, decided, approved) {
       if ((decided.decision === 'REQUIRE_APPROVAL' || decided.decision === 'REQUIRE_DUAL_APPROVAL') && !approved) return { decision: 'WAIT', reason: decided.reason ?? 'policy requires approval' };
       return { decision: 'PROCEED' };
     },
