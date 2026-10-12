@@ -6,7 +6,8 @@
       From        To           Allowed
       experience  control      gateway only
       control     execution    execution API only
-      execution   evidence     evidence /append port only (the service exposes nothing else)
+      execution   evidence     the APPEND port (3004) only — the query port is not reachable
+      control     evidence     the query port (3008: reads, packs, replay) and append (3004: its own events)
       evidence    execution    NONE
       execution   evidence-db  NONE
       execution   web-fetch    fetch API only (module2.md §10.3)
@@ -155,6 +156,10 @@ spec:
       toPorts: {{- include "tcp" (list 3001) | nindent 8 }}
     - toEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
       toPorts: {{- include "tcp" (list 3003) | nindent 8 }}
+    # Module 7: the evidence plane — its query door (3008) on behalf of authorized people, and
+    # its append door (3004) for the control plane's own events (policy.activated).
+    - toEndpoints: {{- include "peer" (dict "ns" $ev "app" "evidence") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3004 3008) | nindent 8 }}
     {{- if .Values.devDependencies.enabled }}
     - toEndpoints:
         {{- include "peer" (dict "ns" $co "app" "postgres-primary") | nindent 8 }}
@@ -322,7 +327,15 @@ spec:
       toPorts: {{- include "tcp" (list 9000) | nindent 8 }}
     - fromEndpoints: {{- include "peer" (dict "ns" $xe "app" "execution") | nindent 8 }}
       toPorts: {{- include "tcp" (list 3004) | nindent 8 }}
+    # Module 7: the control plane reaches both doors; the execution plane (above) only 3004.
+    - fromEndpoints: {{- include "peer" (dict "ns" $co "app" "control") | nindent 8 }}
+      toPorts: {{- include "tcp" (list 3004 3008) | nindent 8 }}
   egress:
+    # Module 7: the content-addressed store and WORM evidence packs, 443 only.
+    {{- with .Values.network.egress.objectStorage }}
+    - toCIDR: {{- include "cidrs" . }}
+      toPorts: {{- include "tcp" (list 443) | nindent 8 }}
+    {{- end }}
     # No rule toward the execution plane exists: evidence cannot initiate that connection.
     {{- if .Values.devDependencies.enabled }}
     - toEndpoints:

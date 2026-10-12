@@ -1,1 +1,12 @@
 export { buildEvidenceApp, AppendRequest, type EvidenceAppOptions } from './app.js';
+export { Anchorer, HttpTimestamper, timeStampRequest, timeStampStatus, toTreeHead, type Timestamper } from './anchor.js';
+export { chainHash, GENESIS_HASH, jcs, sha256 } from './chain/canonical.js';
+export { facetsOf } from './chain/facets.js';
+export { ALG, LocalKeyCustody, messages, type KeyCustody, type PublicKey } from './chain/keys.js';
+export { MerkleTree } from './chain/merkle.js';
+export { ChainService, type AppendInput, type AppendResult } from './chain/service.js';
+export { ContentRedacted, ContentStore, digestOfBytes, type ContentInput } from './content.js';
+export { PackBuilder, type PackQuery, type PackStatus } from './packs/builder.js';
+export { ReplayEngine, TapeTools, type LayerResult, type ReplayResult } from './replay.js';
+export { TraceBuilder, type RunTrace } from './trace.js';
+export { ChainVerifier, type ChainCheck } from './verify.js';

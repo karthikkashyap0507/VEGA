@@ -21,6 +21,7 @@ import { FgaClient, fgaAdmin, modelToJson } from '@vega/authz';
 import { InMemoryIdentityAdmin, loadKeyFile, PrincipalAssertionVerifier, ZitadelAdmin, type IdentityAdmin } from '@vega/idp';
 import { initTelemetry } from '@vega/telemetry';
 import { buildControlApp } from './app.js';
+import { EvidenceClient } from './evidence/client.js';
 
 /**
  * Control-plane process. Loud about every development shortcut it takes: module1 plan,
@@ -179,8 +180,18 @@ try {
 if (!env['PUSH_TOPIC_SECRET']) logger.warn('PUSH_TOPIC_SECRET unset: the console cannot show anyone their push topic');
 const reversibility = { store: new ReversibilityStore(), cache: revokeCache, pushSecret: env['PUSH_TOPIC_SECRET'] };
 
+// Module 7: the evidence plane's query door (reads, packs, replay) and the control plane's own append.
+const evidenceQueryToken = env['EVIDENCE_QUERY_TOKEN'];
+if (!evidenceQueryToken) {
+  if (production) throw new Error('EVIDENCE_QUERY_TOKEN is required in production');
+  logger.warn('DEV: EVIDENCE_QUERY_TOKEN unset: the audit explorer, packs and replay answer 503');
+}
+const evidence = evidenceQueryToken
+  ? new EvidenceClient({ baseUrl: env['EVIDENCE_QUERY_URL'] ?? 'http://localhost:3008', appendUrl: env['EVIDENCE_URL'] ?? 'http://localhost:3004', queryToken: evidenceQueryToken, appendToken: env['EVIDENCE_CONTROL_APPEND_TOKEN'], ...(tls ? { fetchImpl: mtlsFetch(tls) } : {}) })
+  : undefined;
+
 const app = await buildControlApp({
-  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility },
+  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility, ...(evidence ? { evidence } : {}) },
   verifier,
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });

@@ -82,6 +82,9 @@ echo "[2] Execution cannot open TCP to the evidence database"
 if tcp "$XE" execution "evidence.${EV}.svc" 3004; then pass "positive control: execution → evidence:3004 opens"; else fail "positive control: execution → evidence:3004 is blocked (network broken?)"; fi
 if tcp "$XE" execution "postgres-evidence.${EV}.svc" 5432; then fail "execution → evidence DB:5432 OPENED"; else pass "execution → evidence DB:5432 blocked"; fi
 if tcp "$EV" evidence "postgres-evidence.${EV}.svc" 5432; then pass "positive control: evidence → evidence DB:5432 opens"; else fail "positive control: evidence → evidence DB is blocked"; fi
+# Module 7: the query door has its own port, and the execution plane has no route to it.
+if tcp "$XE" execution "evidence.${EV}.svc" 3008; then fail "execution → evidence QUERY port 3008 OPENED"; else pass "execution → evidence query port 3008 blocked"; fi
+if tcp "$CO" control "evidence.${EV}.svc" 3008; then pass "positive control: control → evidence query port 3008 opens"; else fail "positive control: control → evidence:3008 is blocked"; fi
 
 echo "[3] The evidence plane cannot initiate a connection to the execution plane"
 if tcp "$CO" control "execution.${XE}.svc" 3003; then pass "positive control: control → execution:3003 opens"; else fail "positive control: control → execution:3003 is blocked"; fi
@@ -102,6 +105,8 @@ status=$(https "$XE" execution "https://evidence.${EV}.svc:3004/append" POST yes
 if [ "$status" = "201" ]; then pass "execution → evidence POST /append over mTLS: 201"; else fail "execution → evidence /append returned '$status'"; fi
 status=$(https "$XE" execution "https://evidence.${EV}.svc:3004/entries" GET yes)
 if [ "$status" = "404" ] || [ "$status" = "405" ]; then pass "execution → evidence GET /entries: $status (no read path)"; else fail "execution could read from evidence: '$status'"; fi
+status=$(https "$XE" execution "https://evidence.${EV}.svc:3004/query/7a2c1d33-2b6e-4a5f-8f2e-1c9d0b7a6e22/head" GET yes)
+if [ "$status" = "404" ]; then pass "execution → evidence GET /query on the append port: 404 (the query door is not on it)"; else fail "the append port answered /query: '$status'"; fi
 status=$(https "$XE" execution "https://evidence.${EV}.svc:3004/append" POST no)
 if [ "$status" = "TLSFAIL" ]; then pass "evidence refuses a client with no certificate"; else fail "evidence accepted a client without a certificate: '$status'"; fi
 status=$(https "$CO" gateway "https://control.${CO}.svc:3002/trpc/me.get" GET no)

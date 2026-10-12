@@ -1,0 +1,22 @@
+{
+  "entries": 100000,
+  "clientEntries": 24984,
+  "months": 12,
+  "generateMs": 113837,
+  "pack": {
+    "buildMs": 31876,
+    "entries": 24984,
+    "bytes": 99179479,
+    "verified": true,
+    "verifyMs": 53094,
+    "failures": []
+  },
+  "append": {
+    "samples": 300,
+    "p50Ms": 8.4,
+    "p99Ms": 30.8,
+    "maxMs": 54.4
+  },
+  "targetMs": 60000,
+  "passed": true
+}

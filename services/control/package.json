@@ -47,6 +47,7 @@
     "@vega/connector-testing": "workspace:*",
     "@vega/interpreter": "workspace:*",
     "@vega/orchestration": "workspace:*",
+    "@vega/verifier": "workspace:*",
     "tsx": "^4.19.0",
     "vitest": "^2.1.9",
     "zod": "^4.6.5"

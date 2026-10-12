@@ -2,12 +2,13 @@ import { performance } from 'node:perf_hooks';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { schema, withTenant } from '@vega/db';
 import { underRecipient } from '@vega/dsl';
-import type { PolicyDecision, ReasonStep, StepContext } from '@vega/orchestration';
+import type { DecisionInputs, PolicyDecision, ReasonStep, StepContext } from '@vega/orchestration';
 import {
   combine,
   digestOf,
   failClosed,
   PRESET_MODES,
+  PRESET_VERSION,
   PRESETS_BUNDLE,
   packageFor,
   tenantBundleName,
@@ -342,8 +343,24 @@ export class PolicyEngine {
       const combined = combine(scored, [...preset.matches, ...tenant.matches]);
       const latencyMs = Math.round(performance.now() - t0);
       stage = 'record';
-      const recorded = await this.record(ctx, { x, scored, input, combined, latencyMs, bundleVersion: versionOfRevision(tenantRevision) ?? (x.facts.activeBundleVersion !== null && !tenantRevision ? x.facts.activeBundleVersion : 0), bundleRevision: tenantRevision ?? bundles[PRESETS_BUNDLE] ?? null });
-      return toDecision(combined, recorded);
+      const bundleVersion = versionOfRevision(tenantRevision) ?? (x.facts.activeBundleVersion !== null && !tenantRevision ? x.facts.activeBundleVersion : 0);
+      const bundleRevision = tenantRevision ?? bundles[PRESETS_BUNDLE] ?? null;
+      const recorded = await this.record(ctx, { x, scored, input, combined, latencyMs, bundleVersion, bundleRevision });
+      // M7: the exact inputs, so the evidence plane can re-run risk and policy on replay.
+      const matches = [...preset.matches, ...tenant.matches].map((m) => ({ id: m.id, version: m.version }));
+      const inputs: DecisionInputs = {
+        risk: x.risk as unknown as Record<string, unknown>,
+        weights: x.facts.weights as unknown as Record<string, unknown>,
+        policy: input as unknown as Record<string, unknown>,
+        preset: x.facts.preset,
+        presetVersion: PRESET_VERSION,
+        bundleVersion,
+        bundleRevision,
+        matches,
+        decidedBy: combined.decidedBy.key,
+        factors: scored.factors as unknown as Record<string, number>,
+      };
+      return { ...toDecision(combined, recorded), inputs };
     } catch (e) {
       return this.failClosed(ctx, stage, e, { x, scored, input, t0 });
     }

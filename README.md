@@ -15,21 +15,21 @@
 
 ## Status
 
-**Module 1 — Foundation & Tenancy.** Steps 1–2 of 9 complete.
+Modules 1–7 of 10 are complete. Each module's implementation record says where the code is and
+how every acceptance criterion is proven.
 
-| Step | | |
+| Module | | Record |
 |---|---|---|
-| 1 | Workspace skeleton compiles | ✅ |
-| 2 | Database with RLS ⚠ | ✅ |
-| 3 | Identity (Zitadel) | next |
-| 4 | Authorization (OpenFGA) | |
-| 5 | API surface | |
-| 6 | Web shell | |
-| 7 | Self-serve signup | |
-| 8 | Plane separation ⚠ | |
-| 9 | CI gates + invariant enforcement | |
-
-Plan: [docs/module1-implementation-plan.md](docs/module1-implementation-plan.md)
+| 1 | Foundation & Tenancy | [plan](docs/module1-implementation-plan.md) ✅ |
+| 2 | Connector framework & tool layer | [record](docs/module2-implementation.md) ✅ |
+| 3 | Taint-tracked execution & capability interpreter | [record](docs/module3-implementation.md) ✅ |
+| 4 | Agent core: intent, planning, durable execution | [record](docs/module4-implementation.md) ✅ |
+| 5 | Policy, risk & data classification | [record](docs/module5-implementation.md) ✅ |
+| 6 | Reversibility: compensators, holds, undo | [record](docs/module6-implementation.md) ✅ |
+| 7 | Evidence plane: signed chain, packs, replay, verifier | [record](docs/module7-implementation.md) ✅ |
+| 8 | Approval, escalation & Action Center | |
+| 9 | Verification, memory & knowledge | |
+| 10 | Earned autonomy, contention & enterprise scale | |
 
 ---
 

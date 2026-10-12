@@ -21,7 +21,9 @@
                     (dict "name" "MODEL_PLANNER" "value" .Values.models.planner)
                     (dict "name" "MODEL_ROUTINE" "value" .Values.models.routine)
                     (dict "name" "LITELLM_BASE_URL" "value" .Values.models.gatewayUrl)
-                    (dict "name" "S3_BUCKET_POLICY" "value" .Values.policy.bucket)))
+                    (dict "name" "S3_BUCKET_POLICY" "value" .Values.policy.bucket)
+                    (dict "name" "EVIDENCE_URL" "value" (printf "%s://evidence.%s.svc:3004" $scheme (include "ns.evidence" .)))
+                    (dict "name" "EVIDENCE_QUERY_URL" "value" (printf "%s://evidence.%s.svc:3008" $scheme (include "ns.evidence" .)))))
   (dict "name" "execution" "plane" "execution" "port" 3003 "image" .Values.image.service "secret" .Values.secrets.execution "internal" true
         "env" (list (dict "name" "SERVICE" "value" "execution")
                     (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)
@@ -38,7 +40,10 @@
         "env" (list (dict "name" "SERVICE" "value" "web-fetch")
                     (dict "name" "SEARXNG_URL" "value" .Values.search.searxngUrl)))
   (dict "name" "evidence" "plane" "evidence" "port" 3004 "image" .Values.image.service "secret" .Values.secrets.evidence "internal" true
-        "env" (list (dict "name" "SERVICE" "value" "evidence")))
+        "extraPorts" (list (dict "name" "query" "port" 3008))
+        "env" (list (dict "name" "SERVICE" "value" "evidence")
+                    (dict "name" "EVIDENCE_QUERY_PORT" "value" "3008")
+                    (dict "name" "GATEWAY_PUBLIC_URL" "value" .Values.publicUrls.gateway)))
 -}}
 {{- range $wl := $w }}
 {{- $ns := printf "%s-%s" $.Values.prefix $wl.plane }}
@@ -63,6 +68,9 @@ spec:
   selector: { app.kubernetes.io/name: {{ $wl.name }} }
   ports:
     - { name: {{ ternary "https" "http" (and $wl.internal $.Values.mtls.enabled) }}, port: {{ $wl.port }}, targetPort: {{ $wl.port }} }
+    {{- range ($wl.extraPorts | default list) }}
+    - { name: {{ .name }}, port: {{ .port }}, targetPort: {{ .port }} }
+    {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -85,7 +93,11 @@ spec:
           image: "{{ $wl.image.repository }}:{{ $wl.image.tag }}"
           imagePullPolicy: {{ $wl.image.pullPolicy }}
           {{- include "containerSecurity" $ | nindent 10 }}
-          ports: [{ containerPort: {{ $wl.port }} }]
+          ports:
+            - { containerPort: {{ $wl.port }} }
+            {{- range ($wl.extraPorts | default list) }}
+            - { containerPort: {{ .port }} }
+            {{- end }}
           env:
             - { name: NODE_ENV, value: {{ $.Values.environment | quote }} }
             - { name: HOST, value: "0.0.0.0" }

@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema, type Db } from '@vega/db';
-import { Uuid } from '@vega/contracts';
+import { Uuid, type PolicyActivatedRecord } from '@vega/contracts';
 import { launchRegistry } from '@vega/connectors';
 import { problems } from '@vega/shared';
 import { compileModule, compilePolicy, FIELDS, parsePolicyYaml, PolicyError, PRESET_MODES, PRESET_YAML, PROFESSIONAL_SERVICES_PACK, tenantPackage, type Policy, type PolicyInput, type PresetMode } from '@vega/policy-engine';
@@ -113,6 +114,35 @@ async function policiesOf(db: Db, refs: Array<{ key: string; version: number }>)
     if (!row) throw new ProblemError(problems.conflict(`policy ${r.key} v${r.version} is missing`));
     return { policy: parsePolicyYaml(row.specYaml)[0]!, version: r.version, row };
   });
+}
+
+/** `policy.activated` in the evidence chain (docs/module7.md §4.1), documents as content. */
+async function recordActivation(
+  ctx: AuthedContext,
+  a: { bundle: { id: string; version: number; digest: string }; previous: number | null; simulationId: string; policies: Array<{ policy: Policy; version: number }> },
+): Promise<void> {
+  if (!ctx.deps.evidence) {
+    ctx.log.warn({ bundle: a.bundle.version }, 'no evidence plane configured: this policy activation has NO signed record');
+    return;
+  }
+  const docs = a.policies.map((p) => {
+    const bytes = Buffer.from(JSON.stringify(p.policy));
+    return { p, data: bytes.toString('base64'), digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}` };
+  });
+  const record: PolicyActivatedRecord = {
+    bundle_id: a.bundle.id,
+    version: a.bundle.version,
+    previous_version: a.previous,
+    digest: a.bundle.digest,
+    simulation_id: a.simulationId,
+    activated_by: ctx.principal.userId,
+    policies: docs.map((d) => ({ key: d.p.policy.id, version: d.p.version, document_digest: d.digest, citation: d.p.policy.citation ?? null })),
+  };
+  try {
+    await ctx.deps.evidence.append({ tenantId: ctx.principal.tenantId, kind: 'policy.activated', payload: record as unknown as Record<string, unknown>, content: docs.map((d) => ({ data: d.data, mediaType: 'application/json', sensitivity: 'metadata' as const })) });
+  } catch (e) {
+    throw new ProblemError(problems.upstreamUnavailable(`evidence plane (the activation could not be recorded: ${e instanceof Error ? e.message : String(e)})`));
+  }
 }
 
 /** The working set: per key, the latest version — unless that key is retired or retiring. */
@@ -387,6 +417,10 @@ export const policiesRouter = router({
       });
       // The signed bytes go live inside the transaction: if the copy fails, nothing is activated.
       await publisher.activate(ctx.principal.tenantId, bundle.bundleRef, bundle.digest);
+      // Module 7: the activation is evidence, WITH the documents in force — what packs put in
+      // policies/ and what replay evaluates against. Also inside the transaction: an activation
+      // the evidence plane could not record is not an activation.
+      await recordActivation(ctx, { bundle, previous: previous?.version ?? null, simulationId: sim.id, policies: await policiesOf(db, bundle.policyVersions as Array<{ key: string; version: number }>) });
       return { bundle, previous };
     });
     // A tenant's first activation must appear in the discovery bundle before OPA will poll it.

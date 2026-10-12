@@ -20,7 +20,7 @@ import { DbosOrchestrator } from '@vega/orchestration';
 import { RunStore } from '@vega/runs';
 import { buildExecutionApp } from './app.js';
 import { EvidenceAppendClient } from './evidence-append.js';
-import { executionHooks, RUN_WORKFLOW, runWorkflow, type RunTokenCheck } from './executor/index.js';
+import { executionHooks, programReceipt, RUN_WORKFLOW, runWorkflow, type RunTokenCheck } from './executor/index.js';
 import { policyEngineFromEnv } from './policy/index.js';
 import { RuntimeDeclarations } from './programs.js';
 import { ReversibilityStore } from '@vega/compensators';
@@ -154,6 +154,7 @@ if (orchestrator && internalToken) {
       log: logger,
       pager,
       requireGrant: true,
+      programReceipt: programReceipt(evidence),
       reversibility,
     }),
   );

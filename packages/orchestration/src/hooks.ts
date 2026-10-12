@@ -75,10 +75,58 @@ export type PolicyDecision = {
   chain?: ReasonStep[];
   evaluationId?: string;
   failClosed?: boolean;
+  /**
+   * Module 7: what the decision was made ON — recorded in the receipt's replay tape so the
+   * evidence plane can re-run the risk function and the policy evaluation without this database.
+   */
+  inputs?: DecisionInputs;
 };
+
+export interface DecisionInputs {
+  risk: Record<string, unknown> | null;
+  weights: Record<string, unknown> | null;
+  policy: Record<string, unknown> | null;
+  preset: string | null;
+  presetVersion: number | null;
+  bundleVersion: number | null;
+  bundleRevision: string | null;
+  matches: Array<{ id: string; version: number }>;
+  decidedBy: string | null;
+  factors?: Record<string, number> | undefined;
+}
+
+/**
+ * Module 7 — what the executor knows at a receipt that the step context does not: the decision
+ * actually applied (with the gate folded in), the approval and hold, the replay tape and, after
+ * the call, the result. The receipt hook turns it into the §5.1 receipt and its content.
+ */
+export interface ReceiptRecord {
+  policy?: PolicyDecision | undefined;
+  /** What the policy ENGINE decided, before the M3 gate's REQUIRE_APPROVAL was folded in. */
+  engineDecision?: PolicyDecision['decision'] | undefined;
+  approval?: { required: boolean; granted: boolean; approverRole: string | null; by: string[]; evidenceDigest?: string | null; requestId?: string | null } | null | undefined;
+  hold?: { windowMs: number; released: boolean; revoked: boolean } | null | undefined;
+  /** The arguments the program computed, when a person edited what was sent (M6 edit-and-requeue). */
+  programArgs?: Record<string, unknown> | undefined;
+  program?: { digest: string | null; modelId: string | null } | undefined;
+  /** Pre only: everything a DRY re-execution up to this call reads. */
+  tape?: ReceiptTape | undefined;
+  /** Post only: the tool's full result. */
+  result?: unknown;
+}
+
+export interface ReceiptTape {
+  program: { version: number; digest: string; ast: unknown; modelId: string; now: string };
+  inputs: Record<string, { data: unknown; taint: 'TRUSTED' | 'ORG' | 'UNTRUSTED'; sourceId?: string }>;
+  maxCollection: number;
+  declarations: Array<[string, unknown]>;
+  calls: Array<{ seq: number; toolId: string; args: unknown; result: unknown }>;
+  extractions: Array<{ seq: number; schema: string; value?: unknown; error?: string }>;
+  lookups: Array<{ seq: number; registry: 'directory' | 'contacts'; key: string; entity: unknown }>;
+}
 export type SimulationResult = { ok: true; effect: Effect<unknown> } | { ok: false; reason: string };
 export type ApprovalDecision = { decision: 'PROCEED' } | { decision: 'WAIT'; reason: string };
-export type Receipt = { phase: 'pre' | 'post'; outcome?: 'committed' | 'failed' | 'unknown'; effect?: unknown; error?: string };
+export type Receipt = { phase: 'pre' | 'post'; outcome?: 'committed' | 'failed' | 'unknown'; effect?: unknown; error?: string; record?: ReceiptRecord };
 export type VerifyResult = { ok: true } | { ok: false; reason: string; compensate: boolean };
 
 export interface Hooks {
@@ -123,8 +171,10 @@ export function defaultHooks(
       if ((decided.decision === 'REQUIRE_APPROVAL' || decided.decision === 'REQUIRE_DUAL_APPROVAL') && !approved) return { decision: 'WAIT', reason: decided.reason ?? 'policy requires approval' };
       return { decision: 'PROCEED' };
     },
+    // Module 7 is installed: the receipt goes to the signed chain when the caller's recordEvent
+    // appends it there (services/execution executionHooks), and THROWS when it cannot — so the
+    // executor never calls a tool whose receipt was not committed (invariant 2).
     async receipt(ctx, r) {
-      warn('receiptHook', 'signed audit chain (Module 7)', ctx);
       await recordEvent(ctx, r);
     },
     async captureCompensator(ctx) {

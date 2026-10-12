@@ -15,7 +15,13 @@
   },
   "dependencies": {
     "@noble/post-quantum": "^0.7.1",
+    "@vega/contracts": "workspace:*",
     "@vega/db": "workspace:*",
+    "@vega/dsl": "workspace:*",
+    "@vega/interpreter": "workspace:*",
+    "@vega/objectstore": "workspace:*",
+    "@vega/policy-engine": "workspace:*",
+    "@vega/risk": "workspace:*",
     "@vega/shared": "workspace:*",
     "@vega/verifier": "workspace:*",
     "esbuild": "^0.25.12",
@@ -25,6 +31,9 @@
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
+    "@vega/connector-testing": "workspace:*",
+    "@vega/connectors": "workspace:*",
+    "@vega/orchestration": "workspace:*",
     "@vega/service-control": "workspace:*",
     "@vega/service-execution": "workspace:*",
     "pg": "^8.23.0",

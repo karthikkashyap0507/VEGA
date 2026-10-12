@@ -15,6 +15,8 @@ set -euo pipefail
 PREFIX="${PREFIX:-vega}"
 CO="${PREFIX}-control"; XE="${PREFIX}-execution"; EV="${PREFIX}-evidence"
 APPEND_TOKEN="$(openssl rand -hex 24)"
+QUERY_TOKEN="$(openssl rand -hex 24)"          # control → evidence query door (Module 7)
+CONTROL_APPEND_TOKEN="$(openssl rand -hex 24)" # control → evidence append door (its own events)
 EXEC_TOKEN="$(openssl rand -hex 24)"
 EXTRACTOR_TOKEN="$(openssl rand -hex 24)"
 KEK="$(openssl rand -base64 32)"
@@ -47,7 +49,9 @@ kubectl -n "$CO" create secret generic control-secrets --dry-run=client -o yaml 
   --from-literal=CONNECTOR_STATE_SECRET="$(openssl rand -base64 36 | tr -d '\n')" \
   --from-literal=OPENFGA_API_URL="http://openfga.${CO}.svc:8080" \
   --from-literal=RUN_TOKEN_KEY_PEM="$RUN_TOKEN_KEY_PEM" \
-  --from-literal=VALKEY_URL="redis://valkey.${CO}.svc:6379" | kubectl apply -f - >/dev/null
+  --from-literal=VALKEY_URL="redis://valkey.${CO}.svc:6379" \
+  --from-literal=EVIDENCE_QUERY_TOKEN="$QUERY_TOKEN" \
+  --from-literal=EVIDENCE_CONTROL_APPEND_TOKEN="$CONTROL_APPEND_TOKEN" | kubectl apply -f - >/dev/null
 
 kubectl -n "$XE" create secret generic execution-secrets --dry-run=client -o yaml \
   --from-literal=EVIDENCE_APPEND_TOKEN="$APPEND_TOKEN" \
@@ -66,7 +70,11 @@ kubectl -n "$XE" create secret generic extractor-secrets --dry-run=client -o yam
 kubectl -n "$EV" create secret generic evidence-secrets --dry-run=client -o yaml \
   --from-literal=EVIDENCE_DATABASE_URL="postgresql://vega_evi:vega_evi_local_dev_only@${EVIDB}/vega_evidence" \
   --from-literal=EVIDENCE_WRITER_URL="postgresql://vega_evi_writer:vega_evi_writer_local@${EVIDB}/vega_evidence" \
-  --from-literal=EVIDENCE_APPEND_TOKEN="$APPEND_TOKEN" | kubectl apply -f - >/dev/null
+  --from-literal=EVIDENCE_READER_URL="postgresql://vega_evi_reader:vega_evi_reader_local@${EVIDB}/vega_evidence" \
+  --from-literal=EVIDENCE_APPEND_TOKEN="$APPEND_TOKEN" \
+  --from-literal=EVIDENCE_CONTROL_APPEND_TOKEN="$CONTROL_APPEND_TOKEN" \
+  --from-literal=EVIDENCE_QUERY_TOKEN="$QUERY_TOKEN" \
+  --from-literal=EVIDENCE_SIGNING_SEED="$(openssl rand -hex 32)" | kubectl apply -f - >/dev/null
 
 # Stand-in for the evidence signing key (Module 7 uses KMS/HSM). Present so the test can prove
 # the execution identity cannot read it.

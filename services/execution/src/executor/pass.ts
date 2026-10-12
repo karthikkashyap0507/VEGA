@@ -1,6 +1,6 @@
 import type { Ambiguity, ToolDeclarationRecord, ToolResult } from '@vega/contracts';
 import { argsDigest } from '@vega/connector-sdk';
-import type { DurableContext, Hooks, PolicyDecision, SimulationResult, StepContext } from '@vega/orchestration';
+import type { DurableContext, Hooks, PolicyDecision, ReceiptRecord, ReceiptTape, SimulationResult, StepContext } from '@vega/orchestration';
 import {
   RunSuspended,
   type DeclarationPort,
@@ -82,6 +82,22 @@ export interface ExecutorDeps {
   extractCostCents?: number;
   /** Module 6: compensations bound to outcomes, divergence, holds, rollbacks. */
   reversibility?: ReversibilityEngine | undefined;
+  /** Module 7: record a program version in the evidence plane (`run.program`) before its first call. */
+  programReceipt?: ((p: ProgramReceipt) => Promise<void>) | undefined;
+}
+
+export interface ProgramReceipt {
+  tenantId: string;
+  runId: string;
+  version: number;
+  programDigest: string | null;
+  program: unknown;
+  modelId: string;
+  objective: string;
+  trigger: string;
+  agentId: string;
+  agentVersion: number;
+  principalUserId: string;
 }
 
 export type StopReason =
@@ -168,6 +184,8 @@ export interface PassConfig {
   /** Non-read calls committed by EARLIER program versions: facts, never redone (§5.5). */
   committed: readonly CommittedFact[];
   memo: Map<string, unknown>;
+  /** Module 7: the program as this pass runs it, for the replay tape each receipt commits to. */
+  program?: Omit<ReceiptTape, 'calls' | 'extractions' | 'lookups'>;
 }
 
 const READ = 'R0';
@@ -206,6 +224,14 @@ export class DurablePass implements ToolPort {
   readonly recorder: Recorder & { flush(): Promise<void> };
   readonly extractor: ExtractorPort;
   readonly entities: EntityPort;
+  /**
+   * Module 7 — the replay tape: every non-deterministic answer this pass gave the interpreter,
+   * in order. A receipt commits to the tape up to its call, which is exactly what a DRY
+   * re-execution needs to reach the same call with the same arguments.
+   */
+  private readonly tape: Pick<ReceiptTape, 'calls' | 'extractions' | 'lookups'> = { calls: [], extractions: [], lookups: [] };
+  /** The pre-receipt record per journal row, so the post receipt carries the same context. */
+  private readonly receipts = new Map<string, ReceiptRecord>();
 
   constructor(private readonly cfg: PassConfig) {
     const inner = cfg.deps.recorder();
@@ -245,6 +271,7 @@ export class DurablePass implements ToolPort {
       memo.set(mk, out);
     }
     const out = memo.get(mk) as { ok: true; value: unknown; cost: number } | { ok: false; message: string };
+    this.tape.extractions.push(out.ok ? { seq, schema: input.schema, value: out.value } : { seq, schema: input.schema, error: `extraction failed: ${out.message}` });
     if (!out.ok) throw new Error(`extraction failed: ${out.message}`);
     if (out.cost > run.spec.limits.maxCostCents) this.halt('limit', `max_cost_cents ${run.spec.limits.maxCostCents} exceeded (${out.cost})`);
     return out.value;
@@ -257,7 +284,22 @@ export class DurablePass implements ToolPort {
     if (!memo.has(mk)) {
       memo.set(mk, await ctx.step(`resolve:v${version}:p${passNo}:${seq}`, () => deps.entities.lookup(tenantId, registry, key), { retries: 3 }));
     }
-    return memo.get(mk) as Entity | null;
+    const entity = memo.get(mk) as Entity | null;
+    this.tape.lookups.push({ seq, registry, key, entity });
+    return entity;
+  }
+
+  /** What the post receipt carries: the pre receipt's context (no tape) and the result. */
+  private postRecord(rowId: string, result?: unknown): ReceiptRecord {
+    const { tape: _tape, ...pre } = this.receipts.get(rowId) ?? {};
+    return { ...pre, ...(result !== undefined ? { result } : {}) };
+  }
+
+  /** The tape up to (not including) call `seq`, with the program it runs. */
+  private tapeFor(seq: number): ReceiptTape | undefined {
+    const p = this.cfg.program;
+    if (!p) return undefined;
+    return { ...p, calls: this.tape.calls.filter((c) => c.seq < seq), extractions: [...this.tape.extractions], lookups: [...this.tape.lookups] };
   }
 
   // ------------------------------------------------------------------ tool calls
@@ -291,6 +333,7 @@ export class DurablePass implements ToolPort {
     switch (outcome.kind) {
       case 'result':
         if (!outcome.result.ok) this.failure = { toolId: inv.toolId, code: outcome.result.error.code, message: outcome.result.error.message, callSeq: seq };
+        this.tape.calls.push({ seq, toolId: inv.toolId, args: inv.args, result: outcome.result });
         return outcome.result;
       case 'suspend':
         this.suspension = { status: outcome.status, pending: outcome.pending };
@@ -478,9 +521,20 @@ export class DurablePass implements ToolPort {
         },
       };
     }
-    // 4 — receipt BEFORE the side effect (invariant 2). No receipt, no call.
+    // 4 — receipt BEFORE the side effect (invariant 2). No receipt, no call. It commits to the
+    // decision actually applied (gate folded in), the approval and hold, and the replay tape.
+    const record: ReceiptRecord = {
+      policy: merged,
+      engineDecision: policy.decision,
+      approval: needs(merged) || approved ? { required: needs(merged), granted: approved, approverRole: merged.approverRole ?? null, by: [] } : null,
+      hold: holdMs || policy.decision === 'HOLD' ? { windowMs: holdMs ?? 0, released: released.has(key), revoked: false } : null,
+      ...(d !== d0 ? { programArgs: inv0.args } : {}),
+      program: { digest: this.cfg.program?.program.digest ?? null, modelId: this.cfg.program?.program.modelId ?? null },
+      tape: this.tapeFor(seq),
+    };
+    this.receipts.set(row.id, record);
     try {
-      await hooks.receipt(sctx, { phase: 'pre' });
+      await hooks.receipt(sctx, { phase: 'pre', record });
     } catch (e) {
       await mark({ status: 'failed', error: { code: 'RECEIPT_UNAVAILABLE', message: e instanceof Error ? e.message : String(e) }, end: true });
       return { kind: 'stop', reason: 'receipt_unavailable', message: `no audit receipt could be written for ${inv.toolId}; it was not called` };
@@ -531,7 +585,7 @@ export class DurablePass implements ToolPort {
     await persist(() => deps.store.markNode(run.tenantId, run.id, row.id, { status: 'unknown', error: { code: 'OUTCOME_UNKNOWN', message: 'the executor stopped mid-call; this tool has no idempotency key' }, end: true }));
     const actionId = await persist(() => deps.store.upsertAction(run.tenantId, { runId: run.id, nodeRowId: row.id, toolId: inv.toolId, argsDigest: d, taint: inv.gate!.argTaint, reversibility: decl.reversibility, state: 'UNKNOWN' }));
     await deps.reversibility?.bind(run.tenantId, row.id, 'unknown', actionId).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'could not record the unknown outcome on its compensation'));
-    await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'unknown' }).catch(() => undefined);
+    await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'unknown', record: this.postRecord(row.id) }).catch(() => undefined);
     return { kind: 'stop', reason: 'unknown_outcome', message: `${inv.toolId} may or may not have happened: the executor stopped mid-call and the tool cannot be safely retried` };
   }
 
@@ -567,12 +621,12 @@ export class DurablePass implements ToolPort {
       if (result.error.code === 'OUTCOME_UNKNOWN') {
         await mark({ status: 'unknown', error: result.error, end: true });
         await action('UNKNOWN');
-        await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'unknown', error: result.error.code }).catch(() => undefined);
+        await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'unknown', error: result.error.code, record: this.postRecord(row.id, result) }).catch(() => undefined);
         return { kind: 'stop', reason: 'unknown_outcome', message: `${inv.toolId}: ${result.error.message}` };
       }
       await mark({ status: 'failed', error: result.error, end: true });
       await action('FAILED');
-      await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'failed', error: result.error.code }).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'post-receipt failed'));
+      await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'failed', error: result.error.code, record: this.postRecord(row.id, result) }).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'post-receipt failed'));
       return { kind: 'result', result };
     }
     const effect = summarize(result);
@@ -582,7 +636,7 @@ export class DurablePass implements ToolPort {
     const div = rev && sim ? await rev.diverged(sctx, sim, result.effect, actionId).catch((e) => (deps.log.error({ err: e, run_id: run.id }, 'divergence check failed'), { abort: false, message: '' })) : { abort: false, message: '' };
     // 7 — verify (M9), then 8 — the post receipt (M7)
     const v = await deps.hooks.verify(sctx, { effect: result.effect });
-    await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'committed', effect }).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'post-receipt failed'));
+    await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'committed', effect, record: this.postRecord(row.id, result) }).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'post-receipt failed'));
     if (div.abort) return { kind: 'stop', reason: 'divergence', message: `${div.message}: the run was stopped and what it did is being undone` };
     if (!v.ok) return { kind: 'stop', reason: 'verify_failure', message: `verification failed for ${inv.toolId}: ${v.reason}` };
     return { kind: 'result', result };

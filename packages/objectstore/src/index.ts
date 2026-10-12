@@ -1,4 +1,4 @@
-import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, NoSuchKey, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, NoSuchKey, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 /**
  * OBJECT STORAGE — one small interface over S3 (SeaweedFS locally, cloud S3 deployed; see
@@ -14,6 +14,11 @@ export interface ObjectStore {
   /** The object's bytes, or null when there is none. */
   get(key: string): Promise<Buffer | null>;
   ensureBucket(): Promise<void>;
+  /**
+   * Removes an object. Only the evidence plane's content store calls it, for a recorded
+   * redaction (module7.md §5.5); a WORM bucket refuses it, which is the point of WORM.
+   */
+  delete?(key: string): Promise<void>;
 }
 
 export interface S3Options {
@@ -56,6 +61,10 @@ export class S3ObjectStore implements ObjectStore {
     }
   }
 
+  async delete(key: string): Promise<void> {
+    await this.s3.send(new DeleteObjectCommand({ Bucket: this.opts.bucket, Key: key }));
+  }
+
   async ensureBucket(): Promise<void> {
     try {
       await this.s3.send(new HeadBucketCommand({ Bucket: this.opts.bucket }));
@@ -75,6 +84,9 @@ export class MemoryObjectStore implements ObjectStore {
   }
   async get(key: string): Promise<Buffer | null> {
     return this.objects.get(key)?.body ?? null;
+  }
+  async delete(key: string): Promise<void> {
+    this.objects.delete(key);
   }
   async ensureBucket(): Promise<void> {}
 }

@@ -27,7 +27,8 @@ export function injectFetch(app: FastifyInstance): typeof fetch {
       if (Array.isArray(v)) for (const item of v) out.append(k, String(item));
       else out.set(k, String(v));
     }
-    return new Response(res.statusCode === 204 ? null : res.body, { status: res.statusCode, headers: out });
+    // rawPayload, not body: `body` is decoded as UTF-8, which corrupts binary (an evidence pack's zip).
+    return new Response(res.statusCode === 204 ? null : new Uint8Array(res.rawPayload), { status: res.statusCode, headers: out });
   };
   return impl as unknown as typeof fetch;
 }

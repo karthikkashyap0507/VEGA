@@ -123,7 +123,7 @@ export function verifyPack(files: Map<string, Uint8Array>, opts: VerifyOptions =
     return done();
   }
   if (!manifest || manifest.format !== PACK_FORMAT) {
-    add('manifest', 'fail', 'Not a VEGA evidence pack', `expected format ${PACK_FORMAT}`);
+    add('manifest', 'fail', 'Not an evidence pack', `expected format ${PACK_FORMAT}`);
     return done();
   }
   let keys = packKeys;

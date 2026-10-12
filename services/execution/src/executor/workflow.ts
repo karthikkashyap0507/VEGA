@@ -66,6 +66,7 @@ export function runWorkflow(deps: ExecutorDeps) {
     const approvals = new Set<string>();
     const released = new Set<string>();
     const blasted = new Set<number>();
+    const recorded = new Set<number>();
 
     /** A status change is a step: recorded once, replayed rather than repeated. */
     const transition = (name: string, to: RunStatus, opts: Parameters<ExecutorDeps['store']['setStatus']>[3] = {}) =>
@@ -164,7 +165,22 @@ export function runWorkflow(deps: ExecutorDeps) {
       const enter = await transition(`executing:${passNo}`, 'EXECUTING', { reason: null, pending: null });
       if (!enter.ok) return { status: enter.from };
 
-      const pass = new DurablePass({ ctx, deps, run, version, passNo, approvals, released, committed, memo });
+      // M7: the plan a run executes is evidence too — once per version, digests only, before
+      // its first call. Best effort: every action's own receipt carries the program digest.
+      const replay = { program: { version, digest: prog.digest ?? '', ast: prog.ast, modelId: prog.modelId, now: prog.createdAt }, inputs: runInputs(run), maxCollection: run.spec.limits.maxFanout, declarations: decls as Array<[string, unknown]> };
+      if (deps.programReceipt && !recorded.has(version)) {
+        recorded.add(version);
+        await ctx.step(`evidence:program:v${version}`, async () => {
+          try {
+            await deps.programReceipt!({ tenantId, runId, version, programDigest: prog.digest ?? null, program: prog.ast, modelId: prog.modelId, objective: run.objective.objective, trigger: run.trigger, agentId: run.agentId, agentVersion: run.agentVersion, principalUserId: run.principalUserId });
+            return true;
+          } catch (e) {
+            deps.log.warn({ err: e, run_id: runId }, 'the plan could not be recorded in the evidence plane; its actions still carry its digest');
+            return false;
+          }
+        });
+      }
+      const pass = new DurablePass({ ctx, deps, run, version, passNo, approvals, released, committed, memo, program: replay });
       const result = await evaluate(
         { tools: pass, declarations: deps.declarations, extractor: pass.extractor, entities: pass.entities, recorder: pass.recorder, schemas: deps.schemas, ...(deps.pager ? { pager: deps.pager } : {}) },
         program,

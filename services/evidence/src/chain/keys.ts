@@ -21,6 +21,8 @@ export interface PublicKey {
 export interface KeyCustody {
   readonly keyId: string;
   readonly publicKey: string;
+  /** Where the private key lives: `local` (a sealed seed), `kms` (HSM-backed), `customer` (§14.1). */
+  readonly kind?: 'local' | 'kms' | 'customer';
   sign(message: Uint8Array): Promise<string>;
 }
 
@@ -34,6 +36,7 @@ export const messages = {
 export class LocalKeyCustody implements KeyCustody {
   private readonly secretKey: Uint8Array;
   readonly publicKey: string;
+  readonly kind = 'local' as const;
 
   constructor(
     readonly keyId: string,

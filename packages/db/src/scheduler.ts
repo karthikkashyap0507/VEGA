@@ -34,3 +34,10 @@ export async function schedPolicyBundles(): Promise<Array<{ tenantId: string; ve
   const { rows } = await getAppPool().query<{ tenant_id: string; version: number; bundle_ref: string }>('SELECT * FROM sched_policy_bundles()');
   return rows.map((r) => ({ tenantId: r.tenant_id, version: r.version, bundleRef: r.bundle_ref }));
 }
+
+/** Public anchors (Module 7): a tenant slug → its id, or null. Slugs and published anchors are public. */
+export async function evidenceTenantBySlug(slug: string): Promise<string | null> {
+  const { rows } = await getAppPool().query<{ tenant_id: string }>('SELECT tenant_id FROM evidence_tenant_by_slug($1)', [slug]);
+  return rows[0]?.tenant_id ?? null;
+}
+

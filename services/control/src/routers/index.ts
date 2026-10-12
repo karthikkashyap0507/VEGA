@@ -15,6 +15,7 @@ import { policiesRouter } from './policies.js';
 import { riskRouter } from './risk.js';
 import { triggersRouter, webhooksRouter } from './webhooks.js';
 import { holdsRouter, reversibilityRouter, undoRouter } from './reversibility.js';
+import { auditRouter, evidencePacksRouter, publicEvidenceRouter, replayRouter, tracesRouter } from './evidence.js';
 
 export const appRouter = router({
   me: meRouter,
@@ -37,6 +38,11 @@ export const appRouter = router({
   holds: holdsRouter,
   undo: undoRouter,
   reversibility: reversibilityRouter,
+  audit: auditRouter,
+  traces: tracesRouter,
+  evidencePacks: evidencePacksRouter,
+  replay: replayRouter,
+  publicEvidence: publicEvidenceRouter,
   signup: signupRouter,
 });
 

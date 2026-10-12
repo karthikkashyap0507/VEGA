@@ -17,6 +17,7 @@ import type { ConnectorDeps } from './connectors/deps.js';
 import type { AgentCoreDeps, RunCoordinator } from './agent/coordinator.js';
 import type { PolicyPublisher } from './policy/publisher.js';
 import type { ReversibilityStore } from '@vega/compensators';
+import type { EvidenceClient } from './evidence/client.js';
 
 /**
  * Control-plane RPC.
@@ -41,6 +42,8 @@ export interface ControlDeps {
   policy?: { publisher: PolicyPublisher };
   /** Module 6: the reversibility store and the fast revoke cache (Valkey). */
   reversibility?: { store: ReversibilityStore; cache?: FastRevokeLookup | undefined; pushSecret?: string | undefined };
+  /** Module 7: the evidence plane's query door (and the control plane's own append). Absent: 503. */
+  evidence?: EvidenceClient | undefined;
 }
 
 /** The read half of the fast revoke path (execution writes it when a hold opens). */
@@ -228,6 +231,12 @@ export const webhookProcedure = t.procedure.use(async ({ ctx, next }) => {
 export const holdRevokeProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (ctx.principal?.system !== 'hold_revoke') throw new ProblemError(problems.forbidden('hold revoke principal required'));
   return next({ ctx: { ...ctx, log: ctx.deps.logger.child({ system: 'hold_revoke' }) } });
+});
+
+/** Module 7: the published keys and anchors — the gateway's unauthenticated `.well-known` routes. */
+export const evidencePublicProcedure = t.procedure.use(async ({ ctx, next }) => {
+  if (ctx.principal?.system !== 'evidence_public') throw new ProblemError(problems.forbidden('evidence public principal required'));
+  return next({ ctx: { ...ctx, log: ctx.deps.logger.child({ system: 'evidence_public' }) } });
 });
 
 /** Capability gate (layer 1 of 2 — see packages/authz/src/roles.ts). */

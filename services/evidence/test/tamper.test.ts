@@ -246,7 +246,8 @@ describe('vega-verify, the command an auditor runs', () => {
   const cli = join(process.cwd(), 'packages/verifier/src/cli.ts');
   const run = (args: string[]) => {
     try {
-      return { code: 0, out: execFileSync('npx', ['tsx', cli, ...args], { encoding: 'utf8' }) };
+      // The current Node with tsx's loader: `npx` is `npx.cmd` on Windows, which execFile cannot spawn.
+      return { code: 0, out: execFileSync(process.execPath, ['--import', 'tsx', cli, ...args], { encoding: 'utf8' }) };
     } catch (e) {
       const err = e as { status: number; stdout: string };
       return { code: err.status, out: err.stdout };

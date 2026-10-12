@@ -6,7 +6,7 @@ import { formatReport, verifyPack, type TreeHead, type VerifyOptions } from './p
 import type { PublicKeyRecord } from './sign.js';
 
 /**
- * vega-verify — checks a VEGA evidence pack OFFLINE. It opens no socket: the published keys and
+ * vega-verify — checks an evidence pack OFFLINE. It opens no socket: the published keys and
  * anchors, when you want them pinned, are files you fetched yourself.
  *
  *   vega-verify <pack.zip | unpacked-dir> [--keys keys.json] [--anchors anchors.json] [--json]

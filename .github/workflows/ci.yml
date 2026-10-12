@@ -16,6 +16,7 @@ env:
   DATABASE_APP_URL: postgresql://vega_app:vega_app_local_dev_only@localhost:5432/vega
   EVIDENCE_DATABASE_URL: postgresql://vega_evi:vega_evi_local_dev_only@localhost:5433/vega_evidence
   EVIDENCE_WRITER_URL: postgresql://vega_evi_writer:vega_evi_writer_local@localhost:5433/vega_evidence
+  EVIDENCE_READER_URL: postgresql://vega_evi_reader:vega_evi_reader_local@localhost:5433/vega_evidence
   OPENFGA_API_URL: http://localhost:8081
   # Module 5: a plain OPA server for the policy suites, Presidio, and SeaweedFS (S3).
   OPA_TEST_URL: http://localhost:8182
@@ -167,7 +168,7 @@ jobs:
           for s in extractor evidence execution gateway control; do (pnpm --filter @vega/service-$s start > /tmp/$s.log 2>&1 &); sleep 3; done
           pnpm --filter @vega/web build
           (cd apps/web && GATEWAY_URL=http://localhost:3001 npx next start --port 3000 > /tmp/web.log 2>&1 &)
-          for p in 3001 3002 3003 3004 3006; do for i in $(seq 1 60); do curl -sf localhost:$p/readyz && break; sleep 1; done; done
+          for p in 3001 3002 3003 3004 3006 3008; do for i in $(seq 1 60); do curl -sf localhost:$p/readyz && break; sleep 1; done; done
       - run: npx playwright install --with-deps chromium
       - run: pnpm test:e2e
       - name: Service logs on failure

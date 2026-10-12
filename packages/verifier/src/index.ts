@@ -1,5 +1,5 @@
 /**
- * @vega/verifier — independent verification of VEGA evidence (docs/module7.md §5.8).
+ * @vega/verifier — independent verification of evidence packs (docs/module7.md §5.8).
  * Apache-2.0. Runs offline; no network calls; the rules it checks are written out in README.md.
  */
 export { canonicalize } from './canonical.js';
