@@ -4,6 +4,7 @@ import {
   Bot,
   BrainCircuit,
   ClipboardCheck,
+  Gauge,
   LogOut,
   MessageSquare,
   Moon,
@@ -26,6 +27,7 @@ export const SURFACES = [
   { href: '/action-center', label: 'Action Center', icon: Activity },
   { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/approvals', label: 'Approvals', icon: ClipboardCheck },
+  { href: '/autonomy', label: 'Autonomy', icon: Gauge },
   { href: '/audit', label: 'Audit', icon: ScrollText },
   { href: '/studio', label: 'Agent Studio', icon: Bot },
   { href: '/admin', label: 'Admin', icon: Settings },
@@ -68,8 +70,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col md:flex-row">
-      <nav aria-label="Primary" className="flex shrink-0 flex-col border-b border-border bg-surface md:w-56 md:border-b-0 md:border-r">
+    <div className="flex min-h-dvh flex-col md:flex-row print:block">
+      <nav aria-label="Primary" className="flex shrink-0 flex-col border-b border-border bg-surface md:w-56 md:border-b-0 md:border-r print:hidden">
         <div className="flex items-center justify-between px-4 py-3">
           <Link href="/action-center" className="text-sm font-semibold tracking-tight">
             {BRAND.name}
@@ -116,7 +118,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </nav>
-      <main className="min-w-0 flex-1 px-4 py-6 md:px-8">{children}</main>
+      <main className="min-w-0 flex-1 px-4 py-6 md:px-8 print:p-0">{children}</main>
     </div>
   );
 }

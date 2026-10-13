@@ -20,6 +20,7 @@ import type { PolicyPublisher } from './policy/publisher.js';
 import type { ReversibilityStore } from '@vega/compensators';
 import type { EvidenceClient } from './evidence/client.js';
 import type { ApprovalService } from './approvals/service.js';
+import type { AutonomyService } from './autonomy/service.js';
 
 /**
  * Control-plane RPC.
@@ -50,6 +51,8 @@ export interface ControlDeps {
   approvals?: ApprovalService | undefined;
   /** Module 9: the knowledge base and memory (owned here), and planning context. Absent: 503. */
   knowledge?: KnowledgeService | undefined;
+  /** Module 10: the autonomy ladder, contention operations, usage and budgets. Absent: 503. */
+  autonomy?: AutonomyService | undefined;
 }
 
 /** The read half of the fast revoke path (execution writes it when a hold opens). */

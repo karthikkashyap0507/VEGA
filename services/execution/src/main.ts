@@ -26,6 +26,9 @@ import { policyEngineFromEnv } from './policy/index.js';
 import { embedderFromEnv } from '@vega/knowledge';
 import { MemoryStore } from '@vega/memory';
 import { RunMemory, VerificationEngine } from './verification/index.js';
+import { ContactLedger, LockManager, union, WriteReconciler } from '@vega/contention';
+import { AutonomyEngine } from './autonomy/engine.js';
+import { ContentionGuard } from './contention/guard.js';
 import { RuntimeDeclarations } from './programs.js';
 import { ReversibilityStore } from '@vega/compensators';
 import { ntfyNotifier, ntfyPager, ReversibilityEngine, ROLLBACK_WORKFLOW, rollbackWorkflow, valkeyCache } from './reversibility/index.js';
@@ -141,6 +144,11 @@ const reversibility = new ReversibilityEngine({
   publicUrl: env['GATEWAY_PUBLIC_URL'] ?? 'http://localhost:3001',
   pushSecret,
 });
+// ---------------------------------------------------------------- earned autonomy + contention (Module 10)
+// The ladder is read fresh on every consequential step; locks and the contact ledger live in
+// Postgres (the row is the arbiter, as with holds). A pair with no tier is left untouched.
+const autonomy = new AutonomyEngine(logger, {}, undefined, evidence ? { append: (e) => evidence.append(e) } : undefined);
+const contention = new ContentionGuard({ locks: new LockManager(), ledger: new ContactLedger(), reconciler: new WriteReconciler({ tags: union }), log: logger });
 const orchestrator = dbosUrl ? new DbosOrchestrator({ appName: 'vega-execution', systemDatabaseUrl: dbosUrl, logLevel: env['DBOS_LOG_LEVEL'] ?? 'warn' }) : undefined;
 if (orchestrator && internalToken) {
   const invoker = { execute: (i: Parameters<ConnectorRuntime['execute']>[0]) => runtime.execute(i), simulate: (i: Parameters<ConnectorRuntime['simulate']>[0]) => runtime.simulate(i) };
@@ -153,7 +161,10 @@ if (orchestrator && internalToken) {
       extractor,
       entities: new PgEntities(),
       // Module 9: the six checks use M5's cached classifier; memory is embedded self-hosted.
-      hooks: executionHooks({ log: logger, invoker, evidence, requireEvidence: production, policy: (ctx) => policy.decide(ctx), reversibility, verification: new VerificationEngine({ log: logger, classify: (t, text) => policy.classify(t, text) }) }),
+      // Module 10: the autonomy ladder and contention control are enforced here, in the executor.
+      hooks: executionHooks({ log: logger, invoker, evidence, requireEvidence: production, policy: (ctx) => policy.decide(ctx), reversibility, verification: new VerificationEngine({ log: logger, classify: (t, text) => policy.classify(t, text), contacts: contention }), autonomy }),
+      autonomy,
+      contention,
       memory: new RunMemory(new MemoryStore({ embedder: embedderFromEnv(env, (m) => logger.warn(m)), log: logger }), logger),
       schemas: new SchemaRegistry(),
       recorder: () => new PgRecorder(),

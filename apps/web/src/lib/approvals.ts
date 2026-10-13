@@ -108,7 +108,7 @@ export const useSecurity = (enabled: boolean, f: { severity?: string } = {}) =>
 export const useUsage = () =>
   useQuery({ queryKey: ['action-center', 'usage'], queryFn: () => api.get<{ days: number; runs: number; costCents: number; monthToDateCents: number; budgetCents: number; byAgent: Array<{ key: string; runs: number; costCents: number; completed: number }>; models: Array<{ modelId: string; plans: number }>; note: string }>('/v1/action-center/usage') });
 export const useAutonomy = () =>
-  useQuery({ queryKey: ['action-center', 'autonomy'], queryFn: () => api.get<Array<{ agentId: string; name: string; tier: string; runs: number; autonomyRate: number | null; errorRate: number | null; meanTimeToUndoMs: number | null; promotion: { note: string } }>>('/v1/action-center/autonomy') });
+  useQuery({ queryKey: ['action-center', 'autonomy'], queryFn: () => api.get<Array<{ agentId: string; name: string; tier: string; runs: number; autonomyRate: number | null; errorRate: number | null; meanTimeToUndoMs: number | null; pairs?: number; promotion: { eligible: boolean | null; note: string } }>>('/v1/action-center/autonomy') });
 export const useQuality = (enabled = true) =>
   useQuery({ queryKey: ['approval-quality'], queryFn: () => api.get<Array<{ approverId: string; approver: string; windowStart: string; decisions: number; medianLatencyMs: number; p10LatencyMs: number; evidenceOpenRate: number; highEvidenceOpenRate: number | null; editRate: number; rejectRate: number; tooFastRate: number; flag: string | null }>>('/v1/approval-quality?days=30'), enabled });
 

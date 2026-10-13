@@ -22,6 +22,7 @@ export const ENTRY_KINDS = [
   'compensation.failed',
   'policy.activated',
   'autonomy.changed',
+  'certification.completed',
   'admin',
   'taint.violation',
   'run.program',

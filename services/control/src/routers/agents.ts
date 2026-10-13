@@ -6,6 +6,7 @@ import { problems } from '@vega/shared';
 import { schema } from '@vega/db';
 import { AgentSpec, AgentStatus, CreateAgent, PageQuery, UpdateAgent, Uuid } from '@vega/contracts';
 import { callBound, parse, ParseError, print } from '@vega/dsl';
+import { canonicalize } from '@vega/verifier';
 import type { LoadedRun } from '@vega/runs';
 import { bindConnectors, hashSecret, loadAgentSpec } from '../agent/coordinator.js';
 import { understand } from '../agent/intent.js';
@@ -46,6 +47,63 @@ async function requireActiveTenantUser(ctx: AuthedContext, userId: string) {
 
 function hasSpec(spec: unknown): boolean {
   return typeof spec === 'object' && spec !== null && Object.keys(spec).length > 0;
+}
+
+/**
+ * Saves a new version of an agent's spec (PUT /v1/agents/:id/spec, and a team template being
+ * applied). A change to what the agent IS invalidates what was certified: pairs above SUPERVISED
+ * fall back (docs/module10.md §6, §11 "changing one resets certification").
+ */
+export async function saveAgentSpec(ctx: AuthedContext, input: { id: string; spec: AgentSpec }) {
+  const current = await loadAgent(ctx, input.id);
+  await requireRelation(ctx, 'can_manage', fga.agent(input.id));
+  if (current.status === 'archived') throw new ProblemError(problems.preconditionFailed('archived agents cannot be modified'));
+  const { core } = agentCore(ctx);
+  // The spec's autonomy is only its starting point: tiers live in autonomy_state, per workflow × action,
+  // and move only through the ladder (certification + ratification), never through a spec.
+  const spec: AgentSpec = { ...input.spec, autonomy: 'SHADOW' };
+  const issues: Array<{ path: string; message: string }> = [];
+  const known = new Set((await core.execution.toolDeclarations(ctx.principal.tenantId, spec.allowedTools)).map((t) => t.toolId));
+  spec.allowedTools.forEach((t, i) => !known.has(t) && issues.push({ path: `allowedTools.${i}`, message: `no tool ${t} in this tenant` }));
+  spec.triggers.forEach((t, i) => {
+    if (t.kind !== 'schedule') return;
+    try {
+      new Cron(t.cron, { timezone: t.tz });
+    } catch (e) {
+      issues.push({ path: `triggers.${i}.cron`, message: e instanceof Error ? e.message : 'invalid cron' });
+    }
+  });
+  if (spec.triggers.some((t) => t.kind !== 'manual') && !spec.objectiveTemplate.trim()) issues.push({ path: 'objectiveTemplate', message: 'scheduled and webhook triggers need an objective template' });
+  if (spec.program) {
+    try {
+      const p = parse(spec.program);
+      const v = await core.execution.validateProgram(ctx.principal.tenantId, p, { maxCollection: spec.limits.maxFanout });
+      for (const e of v.errors) issues.push({ path: 'program', message: `${e.code}: ${e.message}` });
+      const bound = callBound(p, spec.limits.maxFanout);
+      if (bound > spec.limits.maxSteps) issues.push({ path: 'program', message: `up to ${bound} tool calls; max_steps is ${spec.limits.maxSteps}` });
+    } catch (e) {
+      issues.push({ path: 'program', message: e instanceof ParseError ? e.message : String(e) });
+    }
+  }
+  if (issues.length) throw new ProblemError(problems.validation(issues));
+  const row = await ctx.db(async (db) => {
+    const [latest] = await db.select({ v: schema.agentVersions.version }).from(schema.agentVersions).where(eq(schema.agentVersions.agentId, input.id)).orderBy(desc(schema.agentVersions.version)).limit(1);
+    const version = latest ? latest.v + 1 : current.version;
+    await db.insert(schema.agentVersions).values({ tenantId: ctx.principal.tenantId, agentId: input.id, version, specJson: spec, createdBy: ctx.principal.userId });
+    const [updated] = await db
+      .update(schema.agents)
+      .set({ specJson: spec, version, ...(current.status === 'draft' ? { status: 'active' } : {}) })
+      .where(eq(schema.agents.id, input.id))
+      .returning();
+    await emitEvent(db, ctx.principal.tenantId, ctx.principal.userId, 'agent.spec_saved', { agentId: input.id, version, tools: spec.allowedTools.length });
+    return updated!;
+  });
+  // What the agent is has changed, so what was certified no longer describes it (§6 version_change).
+  // An unchanged re-save is not a change.
+  if (ctx.deps.autonomy && hasSpec(current.specJson) && canonicalize(current.specJson) !== canonicalize(spec)) {
+    await ctx.deps.autonomy.onAgentVersionChange(ctx.principal.tenantId, input.id, row.version, ctx.principal.userId).catch((e: unknown) => ctx.log.error({ err: e, agentId: input.id }, 'could not reset autonomy after an agent change'));
+  }
+  return { agent: toAgent(row), spec, version: row.version };
 }
 
 export const agentsRouter = router({
@@ -253,51 +311,7 @@ export const agentsRouter = router({
   }),
 
   /** PUT /v1/agents/:id/spec — every save is a new version; runs record the version they ran. */
-  putSpec: procedure.input(z.object({ id: Uuid, spec: AgentSpec })).mutation(async ({ ctx, input }) => {
-    const current = await loadAgent(ctx, input.id);
-    await requireRelation(ctx, 'can_manage', fga.agent(input.id));
-    if (current.status === 'archived') throw new ProblemError(problems.preconditionFailed('archived agents cannot be modified'));
-    const { core } = agentCore(ctx);
-    // Autonomy is displayed, never settable, until Module 10.
-    const spec: AgentSpec = { ...input.spec, autonomy: 'SHADOW' };
-    const issues: Array<{ path: string; message: string }> = [];
-    const known = new Set((await core.execution.toolDeclarations(ctx.principal.tenantId, spec.allowedTools)).map((t) => t.toolId));
-    spec.allowedTools.forEach((t, i) => !known.has(t) && issues.push({ path: `allowedTools.${i}`, message: `no tool ${t} in this tenant` }));
-    spec.triggers.forEach((t, i) => {
-      if (t.kind !== 'schedule') return;
-      try {
-        new Cron(t.cron, { timezone: t.tz });
-      } catch (e) {
-        issues.push({ path: `triggers.${i}.cron`, message: e instanceof Error ? e.message : 'invalid cron' });
-      }
-    });
-    if (spec.triggers.some((t) => t.kind !== 'manual') && !spec.objectiveTemplate.trim()) issues.push({ path: 'objectiveTemplate', message: 'scheduled and webhook triggers need an objective template' });
-    if (spec.program) {
-      try {
-        const p = parse(spec.program);
-        const v = await core.execution.validateProgram(ctx.principal.tenantId, p, { maxCollection: spec.limits.maxFanout });
-        for (const e of v.errors) issues.push({ path: 'program', message: `${e.code}: ${e.message}` });
-        const bound = callBound(p, spec.limits.maxFanout);
-        if (bound > spec.limits.maxSteps) issues.push({ path: 'program', message: `up to ${bound} tool calls; max_steps is ${spec.limits.maxSteps}` });
-      } catch (e) {
-        issues.push({ path: 'program', message: e instanceof ParseError ? e.message : String(e) });
-      }
-    }
-    if (issues.length) throw new ProblemError(problems.validation(issues));
-    const row = await ctx.db(async (db) => {
-      const [latest] = await db.select({ v: schema.agentVersions.version }).from(schema.agentVersions).where(eq(schema.agentVersions.agentId, input.id)).orderBy(desc(schema.agentVersions.version)).limit(1);
-      const version = latest ? latest.v + 1 : current.version;
-      await db.insert(schema.agentVersions).values({ tenantId: ctx.principal.tenantId, agentId: input.id, version, specJson: spec, createdBy: ctx.principal.userId });
-      const [updated] = await db
-        .update(schema.agents)
-        .set({ specJson: spec, version, ...(current.status === 'draft' ? { status: 'active' } : {}) })
-        .where(eq(schema.agents.id, input.id))
-        .returning();
-      await emitEvent(db, ctx.principal.tenantId, ctx.principal.userId, 'agent.spec_saved', { agentId: input.id, version, tools: spec.allowedTools.length });
-      return updated!;
-    });
-    return { agent: toAgent(row), spec, version: row.version };
-  }),
+  putSpec: procedure.input(z.object({ id: Uuid, spec: AgentSpec })).mutation(async ({ ctx, input }) => saveAgentSpec(ctx, input)),
 
   /**
    * POST /v1/agents/:id/test — a dry run: C1 and C2 for real, then the program in SIMULATE mode.

@@ -237,6 +237,7 @@ export const actionCenterRouter = router({
       const runs = await db.select({ id: schema.runs.id, agentId: schema.runs.agentId, principal: schema.runs.principalUserId, cost: schema.runs.costCents, status: schema.runs.status, started: schema.runs.startedAt }).from(schema.runs).where(and(gte(schema.runs.startedAt, since), own));
       const programs = runs.length ? await db.select({ runId: schema.programs.runId, modelId: schema.programs.modelId }).from(schema.programs).where(inArray(schema.programs.runId, runs.map((r) => r.id))) : [];
       const [t] = await db.select({ settings: schema.tenants.settings, plan: schema.tenants.plan }).from(schema.tenants).where(eq(schema.tenants.id, ctx.principal.tenantId));
+      const [cap] = await db.select({ limitCents: schema.budgets.limitCents }).from(schema.budgets).where(eq(schema.budgets.tenantId, ctx.principal.tenantId));
       const sum = (rs: typeof runs) => rs.reduce((s, r) => s + r.cost, 0);
       const by = <K extends string>(key: (r: (typeof runs)[number]) => K) => {
         const m = new Map<K, typeof runs>();
@@ -251,7 +252,7 @@ export const actionCenterRouter = router({
         runs: runs.length,
         costCents: sum(runs),
         monthToDateCents: sum(runs.filter((r) => r.started >= monthStart)),
-        budgetCents: ((t?.settings ?? {}) as { budgetCents?: number }).budgetCents ?? ctx.entitlements.limits.budgetCents ?? 0,
+        budgetCents: cap && cap.limitCents > 0 ? cap.limitCents : (((t?.settings ?? {}) as { budgetCents?: number }).budgetCents ?? ctx.entitlements.limits.budgetCents ?? 0),
         byAgent: by((r) => r.agentId),
         byUser: wide(ctx) ? by((r) => r.principal) : [],
         models: [...models].map(([modelId, plans]) => ({ modelId, plans })),
@@ -260,7 +261,7 @@ export const actionCenterRouter = router({
     });
   }),
 
-  /** The autonomy dashboard shell (Module 10 fills promotion; the rates are real today). */
+  /** The Action Center's autonomy card: per agent, its tier on the ladder (the most restrictive of its enrolled pairs) and the rates. The full ladder is /v1/autonomy. */
   autonomy: procedure.query(async ({ ctx }) => {
     requireCapability(ctx, 'agents.read');
     const since = new Date(Date.now() - 30 * 86_400_000);
@@ -270,7 +271,15 @@ export const actionCenterRouter = router({
       const approved = new Set((await db.select({ runId: schema.approvalRequests.runId }).from(schema.approvalRequests).where(gte(schema.approvalRequests.createdAt, since))).map((r) => r.runId));
       const undo = await db.select({ runId: schema.undoMetrics.runId, ms: schema.undoMetrics.durationMs }).from(schema.undoMetrics).where(gte(schema.undoMetrics.requestedAt, since));
       const runAgent = new Map(runs.map((r) => [r.id, r.agentId]));
+      const pairs = await db.select({ agent: schema.autonomyState.workflowKey, tool: schema.autonomyState.actionType, tier: schema.autonomyState.tier, since: schema.autonomyState.since }).from(schema.autonomyState);
+      const certs = await db.select({ agent: schema.certifications.workflowKey, tool: schema.certifications.actionType, rec: schema.certifications.recommendation, decidedAt: schema.certifications.decidedAt, createdAt: schema.certifications.createdAt, fromTier: schema.certifications.fromTier }).from(schema.certifications).orderBy(desc(schema.certifications.createdAt));
+      const order = ['SUSPENDED', 'SHADOW', 'SUPERVISED', 'SAMPLED', 'AUTONOMOUS'];
       return agents.map((a) => {
+        const mine = pairs.filter((p) => p.agent === a.id);
+        const eligible = mine.filter((p) => {
+          const c = certs.find((x) => x.agent === p.agent && x.tool === p.tool);
+          return c && c.rec === 'PROMOTE' && !c.decidedAt && c.fromTier === p.tier && c.createdAt >= p.since;
+        }).length;
         const rs = runs.filter((r) => r.agentId === a.id);
         const done = rs.filter((r) => r.status === 'COMPLETED');
         const failed = rs.filter((r) => ['FAILED', 'COMPENSATION_FAILED', 'NEEDS_ATTENTION'].includes(r.status));
@@ -278,12 +287,13 @@ export const actionCenterRouter = router({
         return {
           agentId: a.id,
           name: a.name,
-          tier: (a.spec as { autonomy?: string }).autonomy ?? 'SHADOW',
+          tier: mine.length ? [...mine].sort((x, y) => order.indexOf(x.tier) - order.indexOf(y.tier))[0]!.tier : ((a.spec as { autonomy?: string }).autonomy ?? 'SHADOW'),
+          pairs: mine.length,
           runs: rs.length,
           autonomyRate: rs.length ? done.filter((r) => !approved.has(r.id)).length / rs.length : null,
           errorRate: rs.length ? failed.length / rs.length : null,
           meanTimeToUndoMs: ttu.length ? Math.round(ttu.reduce((s, x) => s + x, 0) / ttu.length) : null,
-          promotion: { eligible: null, note: 'Promotion eligibility and proposals arrive with Module 10 (earned autonomy).' },
+          promotion: mine.length ? { eligible: eligible > 0, note: eligible > 0 ? `${eligible} action(s) have a passing certification waiting for a person to ratify it.` : 'Promotion is by certification and a person’s ratification; see the autonomy dashboard.' } : { eligible: null, note: 'No action of this agent is on the autonomy ladder yet.' },
         };
       });
     });

@@ -16,6 +16,7 @@ const SECTIONS = [
   { href: '/admin/undo', label: 'Undo' },
   { href: '/admin/approvals', label: 'Oversight' },
   { href: '/admin/knowledge', label: 'Knowledge' },
+  { href: '/autonomy?tab=usage', label: 'Budget & usage' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

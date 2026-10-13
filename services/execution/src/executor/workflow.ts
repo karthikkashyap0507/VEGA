@@ -86,6 +86,8 @@ export function runWorkflow(deps: ExecutorDeps) {
       );
     const end = async (name: string, to: RunStatus, reason: string, extra: { error?: unknown; actorId?: string | null; trigger?: 'run_failure' | 'divergence' | 'verification' } = {}): Promise<RunOutcome> => {
       await ctx.step(`${name}:skip`, () => deps.store.skipPending(tenantId, runId), { retries: 5 });
+      // Module 10B §10.1: locks release automatically on run termination.
+      if (deps.contention) await ctx.step(`${name}:locks`, () => deps.contention!.endRun(tenantId, runId), { retries: 3 });
       // THE SAGA (M6 §5.8): a run that fails with committed actions it can still undo compensates
       // them — strict reverse order of commitment — and ends COMPENSATED or COMPENSATION_FAILED.
       const rev = deps.reversibility;
@@ -99,6 +101,11 @@ export function runWorkflow(deps: ExecutorDeps) {
           if (!t.ok) return { status: t.from };
           const agent = await ctx.step(`${name}:saga:agent`, async () => (await deps.store.load(tenantId, runId))?.agentId ?? null, { retries: 5 });
           const out = await rev.rollback(ctx, tenantId, plan.id, { agentId: agent ?? undefined });
+          // Module 10 §6: a compensation that could not be undone suspends the pair it came from.
+          if (out.state === 'failed' && agent && deps.autonomy) {
+            const tool = out.failed!.toolId;
+            await ctx.step(`${name}:demote:comp`, () => deps.autonomy!.demote(tenantId, agent, tool, 'comp_failure', { why: `the undo of ${tool} failed (${out.failed!.error.code})`, runId }), { retries: 2 });
+          }
           const done = out.state === 'failed' ? 'COMPENSATION_FAILED' : 'COMPENSATED';
           const summary = out.state === 'failed'
             ? `${reason}. Undo failed on ${out.failed!.toolId} (${out.failed!.error.code}); ${out.reversed.length} undone, ${out.notAttempted.length} not attempted — see the incident`
@@ -193,6 +200,7 @@ export function runWorkflow(deps: ExecutorDeps) {
       // ------------------------------------------------------------ the pass is over
       if (result.status === 'completed') {
         await ctx.step(`complete:${passNo}:skip`, () => deps.store.skipPending(tenantId, runId), { retries: 5 });
+        if (deps.contention) await ctx.step(`complete:${passNo}:locks`, () => deps.contention!.endRun(tenantId, runId), { retries: 3 });
         const emits = result.emits.map((e) => ({ data: e.data, taint: e.taint, dataTaint: e.dataTaint, sourceIds: [...e.sourceIds] }));
         // Module 9: what the run asked to remember, and its task history — through the taint gate.
         if (deps.memory) {
@@ -417,6 +425,7 @@ export function runWorkflow(deps: ExecutorDeps) {
       // ------------------------------------------------------------ failures
       if (result.status === 'violated') {
         const v = result.violation;
+        if (deps.autonomy && v?.toolId) await ctx.step(`demote:violation:${passNo}`, () => deps.autonomy!.demote(tenantId, run.agentId, v.toolId, 'taint_violation', { why: `taint violation (${v.kind}) on ${v.toolId}`, runId }), { retries: 2 });
         return end(`violated:${passNo}`, 'FAILED', `security violation (${v?.kind ?? 'taint'}) on ${v?.toolId ?? 'a tool call'}: refused, recorded and paged`, { error: { violation: v ?? null } });
       }
       const stop = pass.stop;
@@ -427,8 +436,9 @@ export function runWorkflow(deps: ExecutorDeps) {
         }
         if (stop.reason === 'verify_compensate') return end(`verifyfailed:${passNo}`, 'FAILED', stop.message, { error: { reason: 'verification' }, trigger: 'verification' });
         if (stop.reason === 'divergence') return end(`diverged:${passNo}`, 'FAILED', stop.message, { error: { reason: 'divergence' }, trigger: 'divergence' });
-        if (stop.reason === 'policy_denial' || stop.reason === 'verify_failure') {
-          const out = await replan(stop.reason, { message: stop.message });
+        if (stop.reason === 'policy_denial' || stop.reason === 'verify_failure' || stop.reason === 'contended') {
+          // M4 reserved `lock_timeout` for exactly this: the step could not get what it needs from another agent.
+          const out = await replan(stop.reason === 'contended' ? 'lock_timeout' : stop.reason, { message: stop.message });
           if (out) return out;
           continue;
         }

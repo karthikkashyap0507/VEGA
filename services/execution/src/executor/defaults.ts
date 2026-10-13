@@ -5,6 +5,7 @@ import type { EvidenceAppendClient } from '../evidence-append.js';
 import { actionReceipt, programEntry } from '../evidence-receipt.js';
 import type { ReversibilityEngine } from '../reversibility/engine.js';
 import { VerificationEngine, type VerificationDeps } from '../verification/engine.js';
+import type { AutonomyEngine } from '../autonomy/engine.js';
 import type { ExecutorLog, ProgramReceipt, ToolInvoker } from './pass.js';
 
 /**
@@ -35,6 +36,9 @@ export function executionHooks(opts: {
   verification?: VerificationEngine | undefined;
   classify?: VerificationDeps['classify'];
   kb?: VerificationDeps['kb'];
+  contacts?: VerificationDeps['contacts'];
+  /** Module 10: the autonomy ladder. Absent: nothing is added to policy's own decision. */
+  autonomy?: AutonomyEngine | undefined;
 }): Hooks {
   const simulate = async (ctx: StepContext): Promise<SimulationResult> => {
     if (ctx.tool.reversibility === 'R0') {
@@ -75,8 +79,8 @@ export function executionHooks(opts: {
     await withTenant(ctx.tenantId, (db) => db.insert(schema.platformEvents).values({ tenantId: ctx.tenantId, actorId: null, kind: `action.receipt.${r.phase}`, payload: event }));
   };
 
-  const verifier = opts.verification ?? new VerificationEngine({ log: opts.log, classify: opts.classify, kb: opts.kb });
-  const hooks = defaultHooks(opts.log, simulate, recordEvent, opts.policy, { preVerify: (ctx, i) => verifier.preVerify(ctx, i), verify: (ctx, r) => verifier.verify(ctx, r) });
+  const verifier = opts.verification ?? new VerificationEngine({ log: opts.log, classify: opts.classify, kb: opts.kb, contacts: opts.contacts });
+  const hooks = defaultHooks(opts.log, simulate, recordEvent, opts.policy, { preVerify: (ctx, i) => verifier.preVerify(ctx, i), verify: (ctx, r) => verifier.verify(ctx, r) }, opts.autonomy ? (ctx, decided, extra) => opts.autonomy!.fold(ctx, decided, extra) : undefined);
   const rev = opts.reversibility;
   return rev ? { ...hooks, captureCompensator: (ctx) => rev.arm(ctx) } : hooks;
 }

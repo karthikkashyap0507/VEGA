@@ -17,6 +17,7 @@ import { triggersRouter, webhooksRouter } from './webhooks.js';
 import { holdsRouter, reversibilityRouter, undoRouter } from './reversibility.js';
 import { auditRouter, evidencePacksRouter, publicEvidenceRouter, replayRouter, tracesRouter } from './evidence.js';
 import { kbRouter, memoriesRouter, retrievalsRouter, verificationsRouter } from './knowledge.js';
+import { autonomyRouter, budgetsRouter, contentionRouter, teamTemplatesRouter, usageRouter } from './autonomy.js';
 import { actionCenterRouter, approvalQualityRouter, approvalsRouter, delegationsRouter } from './approvals.js';
 
 export const appRouter = router({
@@ -53,6 +54,11 @@ export const appRouter = router({
   kb: kbRouter,
   verifications: verificationsRouter,
   retrievals: retrievalsRouter,
+  autonomy: autonomyRouter,
+  contention: contentionRouter,
+  usage: usageRouter,
+  budgets: budgetsRouter,
+  teamTemplates: teamTemplatesRouter,
   signup: signupRouter,
 });
 

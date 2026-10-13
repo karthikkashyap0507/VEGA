@@ -9,3 +9,4 @@ export {
   type ProvisioningDeps,
 } from './provisioning.js';
 export { injectFetch } from './inject-fetch.js';
+export { AutonomyService } from './autonomy/service.js';

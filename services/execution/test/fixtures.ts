@@ -122,6 +122,7 @@ export class HookRecorder {
     const rec = (ctx: { runId: string; callSeq: number; toolId: string }, step: (typeof HOOK_ORDER)[number]) => this.log.push({ runId: ctx.runId, callSeq: ctx.callSeq, toolId: ctx.toolId, step });
     return {
       policy: async (c) => (rec(c, 'policy'), inner.policy(c)),
+      autonomy: async (c, d, x) => (rec(c, 'autonomy'), inner.autonomy(c, d, x)),
       simulate: async (c) => (rec(c, 'simulate'), inner.simulate(c)),
       preVerify: async (c, i) => (rec(c, 'preVerify'), inner.preVerify(c, i)),
       approval: async (c, s, p, a) => (rec(c, 'approval'), inner.approval(c, s, p, a)),
@@ -166,7 +167,7 @@ export const allowAllPolicyForExecutorTests = async (): Promise<PolicyDecision> 
 
 export async function executorKit(
   fetchImpl: typeof fetch,
-  opts: { extractor?: ExtractorPort; hooks?: (h: Hooks) => Hooks; policy?: (ctx: StepContext) => Promise<PolicyDecision>; reversibility?: Partial<EngineDeps> | boolean } = {},
+  opts: { extractor?: ExtractorPort; hooks?: (h: Hooks) => Hooks; policy?: (ctx: StepContext) => Promise<PolicyDecision>; reversibility?: Partial<EngineDeps> | boolean; contacts?: { cooldown(tenantId: string, recipients: string[], exceptRunId: string): Promise<string | null> } } = {},
 ): Promise<ExecutorKit> {
   const runtime = runtimeFor(fetchImpl);
   const registry = launchRegistry();
@@ -192,7 +193,7 @@ export async function executorKit(
       ...(typeof opts.reversibility === 'object' ? opts.reversibility : {}),
     });
   }
-  const base = executionHooks({ log: silent, invoker, requireEvidence: false, policy: opts.policy ?? allowAllPolicyForExecutorTests, reversibility: kit.engine });
+  const base = executionHooks({ log: silent, invoker, requireEvidence: false, policy: opts.policy ?? allowAllPolicyForExecutorTests, reversibility: kit.engine, ...(opts.contacts ? { contacts: opts.contacts } : {}) });
   kit.deps = {
     store,
     invoker,

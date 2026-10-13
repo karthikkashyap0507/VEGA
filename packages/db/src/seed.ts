@@ -266,6 +266,46 @@ export async function seed(connectionString?: string): Promise<SeedResult> {
       await client.query(`INSERT INTO retrievals (tenant_id, query, chunk_ids, memory_ids, acl_filtered) VALUES ($1, 'seed', '{}', '{}', 0)`, [tenantId]);
       await client.query(`INSERT INTO webauthn_challenges (tenant_id, user_id, purpose, challenge, expires_at) VALUES ($1, $2, 'register', 'seed', now())`, [tenantId, userId]);
 
+      // Module 10: one of everything the ladder, contention control and budgets write.
+      const cert = await client.query<{ id: string }>(
+        `INSERT INTO certifications (tenant_id, workflow_key, action_type, window_from, window_to, sample_size, agreement_rate, edit_rate, critical_errors, error_taxonomy, connector_versions, model_versions, from_tier, recommendation, report_ref, signature)
+         VALUES ($1, $2, 'gmail.send', now() - interval '60 days', now(), 200, 0.96, 0.1, 0, '[]', '{}', '[]', 'SUPERVISED', 'PROMOTE', 'sha256:seed', 'seed') RETURNING id`,
+        [tenantId, ag.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO autonomy_state (tenant_id, workflow_key, action_type, tier, certification_id, ratified_by) VALUES ($1, $2, 'gmail.send', 'SAMPLED', $3, $4) ON CONFLICT (tenant_id, workflow_key, action_type) DO NOTHING`,
+        [tenantId, ag.rows[0]!.id, cert.rows[0]!.id, userId],
+      );
+      await client.query(
+        `INSERT INTO autonomy_transitions (tenant_id, workflow_key, action_type, from_tier, to_tier, direction, trigger, evidence_json, actor_id) VALUES ($1, $2, 'gmail.send', 'SUPERVISED', 'SAMPLED', 'PROMOTE', 'certification', '{}', $3)`,
+        [tenantId, ag.rows[0]!.id, userId],
+      );
+      await client.query(
+        `INSERT INTO policy_proposals (tenant_id, kind, subject_json, evidence_json, proposed_change, confidence, expires_at) VALUES ($1, 'promote', '{}', '{}', '{}', 0.9, now() + interval '30 days')`,
+        [tenantId],
+      );
+      await client.query(
+        `INSERT INTO novelty_baselines (tenant_id, workflow_key, action_type, feature_stats) VALUES ($1, $2, 'gmail.send', '{}')`,
+        [tenantId, ag.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO entity_locks (tenant_id, entity_key, mode, holder_run_id, holder_agent_id, intent, lease_expires_at) VALUES ($1, 'crm:account:seed', 'EXCLUSIVE_WRITE', $2, $3, 'seed', now() + interval '1 minute') ON CONFLICT DO NOTHING`,
+        [tenantId, run.rows[0]!.id, ag.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO entity_lock_waits (tenant_id, entity_key, mode, waiting_run_id, waiting_agent_id, risk_tier) VALUES ($1, 'crm:account:seed-other', 'EXCLUSIVE_WRITE', $2, $3, 'LOW') ON CONFLICT DO NOTHING`,
+        [tenantId, run.rows[0]!.id, ag.rows[0]!.id],
+      );
+      await client.query(
+        `INSERT INTO contact_ledger (tenant_id, external_identity, channel, contacted_at, by_run_id, by_agent_id, on_behalf_of, relationship_type, cooldown_until) VALUES ($1, 'seed@partner.example', 'email', now(), $2, $3, $4, 'prospect', now() + interval '5 days')`,
+        [tenantId, run.rows[0]!.id, ag.rows[0]!.id, userId],
+      );
+      await client.query(
+        `INSERT INTO write_conflicts (tenant_id, entity_key, field, proposals) VALUES ($1, 'crm:account:seed', 'owner', '[]')`,
+        [tenantId],
+      );
+      await client.query(`INSERT INTO budgets (tenant_id, limit_cents, breach_behavior) VALUES ($1, 100000, 'queue') ON CONFLICT DO NOTHING`, [tenantId]);
+
       made['tenant' + key] = tenantId;
       made['user' + key] = userId;
       made['workspace' + key] = workspaceId;

@@ -15,8 +15,9 @@
 
 ## Status
 
-Modules 1–8 of 10 are complete. Each module's implementation record says where the code is and
-how every acceptance criterion is proven.
+Modules 1–10 of 10 are built. Each module's implementation record says where the code is and
+how every acceptance criterion is proven; Module 10's also says what the spec asks for that is
+infrastructure rather than code (deployment modes, SCIM, the deferred marketplace) and is not here.
 
 | Module | | Record |
 |---|---|---|
@@ -29,7 +30,7 @@ how every acceptance criterion is proven.
 | 7 | Evidence plane: signed chain, packs, replay, verifier | [record](docs/module7-implementation.md) ✅ |
 | 8 | Approval, escalation & Action Center | [record](docs/module8-implementation.md) ✅ |
 | 9 | Verification, memory & knowledge | [record](docs/module9-implementation.md) ✅ |
-| 10 | Earned autonomy, contention & enterprise scale | |
+| 10 | Earned autonomy, contention & enterprise scale | [record](docs/module10-implementation.md) ✅ |
 
 ---
 

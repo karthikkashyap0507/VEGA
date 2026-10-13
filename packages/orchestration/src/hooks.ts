@@ -4,7 +4,7 @@ import type { Effect, ToolDeclarationRecord } from '@vega/contracts';
  * THE SIX EXTENSION POINTS — docs/module4.md §5.3, §5.6. Every consequential step runs them in
  * THIS order, and two orderings are load-bearing and must never be "optimized":
  *
- *   policyHook → simulateHook → preVerify → approvalGate → receiptHook('pre') → captureCompensator
+ *   policyHook → autonomy → simulateHook → preVerify → approvalGate → receiptHook('pre') → captureCompensator
  *     → [the tool call, through the M3 gate and the M2 runtime] → verifyHook → receiptHook('post')
  *
  *   · receipt BEFORE the side effect (PROJECT.md invariant 2): an effect without an audit entry
@@ -161,9 +161,21 @@ export interface VerificationOutcome {
   unsupportedClaims: Array<{ text: string; reason: string }>;
 }
 
+/** What the autonomy ladder needs to know that the step context does not. */
+export interface AutonomyContext {
+  /** The planner model that produced the program this call belongs to (a pinned version, §4). */
+  modelId: string | null;
+}
+
 export interface Hooks {
   /** Module 5. Every consequential step: ALLOW, hold, approval (single or dual), or DENY. */
   policy(ctx: StepContext): Promise<PolicyDecision>;
+  /**
+   * Module 10 (§7). The autonomy ladder, enforced HERE — at the executor, never the UI. It may
+   * only make the decision stricter than policy's own: an AUTONOMOUS tier never relaxes a
+   * REQUIRE_APPROVAL, a SUPERVISED one never loosens anything.
+   */
+  autonomy(ctx: StepContext, decided: PolicyDecision, extra: AutonomyContext): Promise<PolicyDecision>;
   /** Module 6. Blast radius. */
   simulate(ctx: StepContext): Promise<SimulationResult>;
   /** Module 8. WAIT pauses the run on a signal. `approved` = a human already approved this node. */
@@ -196,6 +208,7 @@ export function defaultHooks(
   recordEvent: (ctx: StepContext, r: Receipt) => Promise<void>,
   policy: (ctx: StepContext) => Promise<PolicyDecision>,
   verification: Pick<Hooks, 'preVerify' | 'verify'>,
+  autonomy?: Hooks['autonomy'],
 ): Hooks {
   const warn = (hook: string, module: string, ctx: StepContext) =>
     log.warn({ hook, module, run_id: ctx.runId, node_id: ctx.nodeId, tool_id: ctx.toolId, ungoverned: true }, `${hook}: ${module} not installed — step is UNGOVERNED by it`);
@@ -221,6 +234,8 @@ export function defaultHooks(
       if (ctx.tool.reversibility !== 'R0') warn('captureCompensator', 'compensation engine (Module 6)', ctx);
       return { captured: false };
     },
+    // Module 10: no ladder wired means nothing is added to policy's own decision.
+    autonomy: autonomy ?? (async (_ctx, decided) => decided),
     // Module 9 is installed: like policy, verification has no permissive default — whoever wires
     // the hooks supplies the engine (services/execution/src/verification).
     preVerify: (ctx, input) => verification.preVerify(ctx, input),
@@ -229,4 +244,4 @@ export function defaultHooks(
 }
 
 /** The order, as data, so tests can assert it and a refactor cannot silently reorder it. */
-export const HOOK_ORDER = ['policy', 'simulate', 'preVerify', 'approval', 'receipt:pre', 'captureCompensator', 'call', 'verify', 'receipt:post'] as const;
+export const HOOK_ORDER = ['policy', 'autonomy', 'simulate', 'preVerify', 'approval', 'receipt:pre', 'captureCompensator', 'call', 'verify', 'receipt:post'] as const;

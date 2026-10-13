@@ -83,6 +83,16 @@ const TENANT_TABLES: Array<{ table: string; idColumn: string; tenantColumn: stri
   { table: 'kb_documents', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'kb_chunks', idColumn: 'id', tenantColumn: 'tenant_id' },
   { table: 'retrievals', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'autonomy_state', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'certifications', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'autonomy_transitions', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'policy_proposals', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'novelty_baselines', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'entity_locks', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'entity_lock_waits', idColumn: 'waiting_run_id', tenantColumn: 'tenant_id' },
+  { table: 'contact_ledger', idColumn: 'id', tenantColumn: 'tenant_id', appendOnly: true },
+  { table: 'write_conflicts', idColumn: 'id', tenantColumn: 'tenant_id' },
+  { table: 'budgets', idColumn: 'tenant_id', tenantColumn: 'tenant_id' },
 ];
 
 let appPool: pg.Pool;

@@ -21,6 +21,7 @@ import type { JournalRow, LoadedRun, RunStore } from '@vega/runs';
 import type { ReversibilityEngine } from '../reversibility/engine.js';
 import type { ApprovalOrchestrator } from '../approvals/orchestrator.js';
 import type { RunMemory } from '../verification/memory.js';
+import type { DemotionTrigger } from '@vega/autonomy';
 import type { TaintLevel as Taint } from '@vega/contracts';
 
 /**
@@ -90,6 +91,25 @@ export interface ExecutorDeps {
   approvals?: ApprovalOrchestrator | undefined;
   /** Module 9: what a completed run remembers (the taint gate decides what may be). */
   memory?: RunMemory | undefined;
+  /** Module 10: event-driven demotion — called the moment a §6 trigger fires. Absent: nothing demotes. */
+  autonomy?: AutonomyPort | undefined;
+  /** Module 10B: entity locks, the contact ledger, write reconciliation. Absent: no contention control. */
+  contention?: ContentionPort | undefined;
+}
+
+export interface AutonomyPort {
+  demote(tenantId: string, agentId: string, toolId: string, trigger: DemotionTrigger, evidence: Record<string, unknown>): Promise<void>;
+}
+
+export type ContentionResult = { ok: true; handle: unknown } | { ok: false; kind: 'cooldown' | 'locked' | 'deadlock' | 'conflict'; message: string; retryAfter?: string; conflictId?: string };
+
+export interface ContentionPort {
+  /** Just before a consequential call, after approval: locks, the contact ledger, declared writes. */
+  before(ctx: StepContext, effect: { externalRecipients: string[]; recordsAffected: Array<{ system: string; id: string; field?: string | undefined; after?: unknown }> }, o: { riskTier: string | null }): Promise<ContentionResult>;
+  /** After the call, committed or not: short locks and in-flight write intents are released. */
+  after(ctx: StepContext, handle: unknown): Promise<void>;
+  /** The run ended: everything it still holds goes. */
+  endRun(tenantId: string, runId: string): Promise<void>;
 }
 
 export interface ProgramReceipt {
@@ -111,6 +131,7 @@ export type StopReason =
   | 'policy_unavailable'
   | 'verify_failure'
   | 'verify_compensate'
+  | 'contended'
   | 'unknown_outcome'
   | 'not_allowed'
   | 'limit'
@@ -245,6 +266,8 @@ export class DurablePass implements ToolPort {
   private readonly tape: Pick<ReceiptTape, 'calls' | 'extractions' | 'lookups'> = { calls: [], extractions: [], lookups: [] };
   /** The pre-receipt record per journal row, so the post receipt carries the same context. */
   private readonly receipts = new Map<string, ReceiptRecord>();
+  /** Module 10B: what each call's contention guard is holding until the call finishes. */
+  private readonly held = new Map<string, unknown>();
   /** Module 9: what each call's pre-commit verification saw, for its post-commit verification. */
   private readonly vInputs = new Map<string, VerificationInput>();
   /** The declared output taint of each call's result (the evidence a claim is found in). */
@@ -494,12 +517,17 @@ export class DurablePass implements ToolPort {
 
     // 1 — policy (M5). A DENY ends the call here; a fail-closed DENY (the engine could not
     // decide) ends the RUN — replanning around an outage would only meet it again.
-    const policy = await hooks.policy(sctx);
+    const decided = await hooks.policy(sctx);
+    // 1b — the autonomy ladder (M10 §7): enforced here, on every consequential call, read fresh.
+    // It can only make the decision STRICTER than policy's own.
+    const policy = await hooks.autonomy(sctx, decided, { modelId: this.cfg.program?.program.modelId ?? null });
     if (policy.decision === 'DENY') {
-      const code = policy.failClosed ? 'POLICY_UNAVAILABLE' : 'POLICY_DENIED';
+      const byAutonomy = decided.decision !== 'DENY' && !!policy.chain?.some((c) => c.step === 'autonomy');
+      const byBudget = decided.decision !== 'DENY' && !!policy.chain?.some((c) => c.step === 'budget');
+      const code = byBudget ? 'BUDGET_HALTED' : byAutonomy ? 'AUTONOMY_SUSPENDED' : policy.failClosed ? 'POLICY_UNAVAILABLE' : 'POLICY_DENIED';
       await mark({ status: 'failed', error: { code, message: policy.reason ?? 'denied by policy', ...(policy.evaluationId ? { evaluationId: policy.evaluationId } : {}) }, end: true });
       if (policy.failClosed) return { kind: 'stop', reason: 'policy_unavailable', message: `the policy engine could not decide on ${inv.toolId}; denied (fail closed): ${policy.reason ?? ''}` };
-      return { kind: 'stop', reason: 'policy_denial', message: `policy denied ${inv.toolId}${policy.reason ? `: ${policy.reason}` : ''}` };
+      return { kind: 'stop', reason: 'policy_denial', message: byBudget ? `${inv.toolId} was stopped: ${policy.reason ?? 'budget reached'}` : byAutonomy ? `${inv.toolId} is suspended for this workflow: ${policy.reason ?? ''}` : `policy denied ${inv.toolId}${policy.reason ? `: ${policy.reason}` : ''}` };
     }
     // 2 — simulate (M6)
     const sim: SimulationResult = await hooks.simulate(sctx);
@@ -530,6 +558,12 @@ export class DurablePass implements ToolPort {
     // Who receives it is what the taint gate and the policy judged (M6's rule): an edit that ADDS a
     // recipient is a different action, whatever the score says.
     const added = editedFrom ? recipientsAdded(decl, inv0.args, inv.args) : [];
+    if (editedFrom) {
+      const changed = recipientsChanged(decl, inv0.args, inv.args);
+      if (changed.length) {
+        await deps.autonomy?.demote(run.tenantId, run.agentId, inv.toolId, 'critical_error', { why: `an approver changed who receives ${inv.toolId}: ${changed.join(', ')}`, runId: run.id, recipients: changed });
+      }
+    }
     const carried = !!editedFrom && !tierUp && !added.length;
     const why = tierUp ? `the edit raised the risk from ${editedFrom!.tier ?? 'unknown'} to ${policy.riskTier ?? 'unknown'}` : `the edit added ${added.length === 1 ? 'a recipient' : 'recipients'} (${added.join(', ')})`;
     const merged1: PolicyDecision = editedFrom && !carried ? { ...merged0, decision: needs(merged0) ? merged0.decision : 'REQUIRE_APPROVAL', reason: `${why}; approve it again — ${merged0.reason ?? ''}`.trim() } : merged0;
@@ -538,7 +572,7 @@ export class DurablePass implements ToolPort {
     // 2b — verification, pre-commit (M9): the six checks on the arguments actually about to be
     // sent. ABORT stops the step (the run replans); ESCALATE puts a person in front of it.
     const objective = [run.objective.objective, ...run.objective.constraints, ...run.objective.successCriteria].join('\n');
-    const vin: VerificationInput = { sim, policy: merged1, engineDecision: policy.decision, approved, objective, reads: this.reads(seq) };
+    const vin: VerificationInput = { sim, policy: merged1, engineDecision: decided.decision, approved, objective, reads: this.reads(seq) };
     const pre = await hooks.preVerify(sctx, vin);
     if (pre.outcome === 'ABORT') {
       await mark({ status: 'failed', error: { code: 'VERIFICATION_FAILED', message: pre.reason ?? 'verification failed', ...(pre.id ? { verificationId: pre.id } : {}) }, end: true });
@@ -579,11 +613,22 @@ export class DurablePass implements ToolPort {
         },
       };
     }
+    // 3c — contention control (M10B): the contact ledger, entity locks and declared writes. After
+    // approval (a person's wait must not hold locks) and before the receipt (a send that cannot
+    // happen leaves no receipt of intent).
+    if (deps.contention && decl.reversibility !== READ && sim.ok) {
+      const c = await deps.contention.before(sctx, { externalRecipients: sim.effect.externalRecipients, recordsAffected: sim.effect.recordsAffected }, { riskTier: policy.riskTier ?? null });
+      if (!c.ok) {
+        await mark({ status: 'failed', error: { code: 'CONTENDED', message: c.message, kind: c.kind, ...(c.conflictId ? { conflictId: c.conflictId } : {}) }, end: true });
+        return { kind: 'stop', reason: 'contended', message: `${inv.toolId}: ${c.message}` };
+      }
+      this.held.set(row.id, c.handle);
+    }
     // 4 — receipt BEFORE the side effect (invariant 2). No receipt, no call. It commits to the
     // decision actually applied (gate folded in), the approval and hold, and the replay tape.
     const record: ReceiptRecord = {
       policy: merged,
-      engineDecision: policy.decision,
+      engineDecision: decided.decision,
       approval: needs(merged) || approved ? { required: needs(merged), granted: approved, approverRole: merged.approverRole ?? null, by: approvalInfo?.by ?? [], evidenceDigest: approvalInfo?.packetDigest ?? null, requestId: approvalInfo?.requestId ?? null } : null,
       hold: holdMs || policy.decision === 'HOLD' ? { windowMs: holdMs ?? 0, released: released.has(key), revoked: false } : null,
       ...(d !== d0 ? { programArgs: inv0.args } : {}),
@@ -670,6 +715,9 @@ export class DurablePass implements ToolPort {
         result = { ok: false, error: { code: 'PROVIDER_ERROR', message: e instanceof Error ? e.message : 'connector failure' } };
       }
     }
+    // Short locks and in-flight write intents end with the call, whatever its outcome.
+    await deps.contention?.after(sctx, this.held.get(row.id)).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'contention release failed (leases expire)'));
+    this.held.delete(row.id);
     const nonRead = decl.reversibility !== READ;
     const rev = deps.reversibility;
     const action = async (state: 'COMMITTED' | 'FAILED' | 'UNKNOWN', effect?: unknown): Promise<string | null> => {
@@ -706,6 +754,7 @@ export class DurablePass implements ToolPort {
     await deps.hooks.receipt(sctx, { phase: 'post', outcome: 'committed', effect, record: { ...this.postRecord(row.id, result), verification: v.verification } }).catch((e) => deps.log.error({ err: e, run_id: run.id }, 'post-receipt failed'));
     if (div.abort) return { kind: 'stop', reason: 'divergence', message: `${div.message}: the run was stopped and what it did is being undone` };
     // Post-commit: it already happened — the run fails and its saga undoes what it did (M6).
+    if (!v.ok && v.compensate) await deps.autonomy?.demote(run.tenantId, run.agentId, inv.toolId, 'critical_error', { why: `post-commit verification failed for ${inv.toolId}: ${v.reason}`, runId: run.id });
     if (!v.ok) return { kind: 'stop', reason: v.compensate ? 'verify_compensate' : 'verify_failure', message: `verification failed for ${inv.toolId} after it ran: ${v.reason}` };
     return { kind: 'result', result };
   }
@@ -719,6 +768,13 @@ class CalledError extends Error {
 }
 
 export type { DurableContext };
+
+/** Recipients that differ between the program's arguments and the approver's: added OR removed. */
+function recipientsChanged(decl: ToolDeclarationRecord, before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+  const a = recipientsAdded(decl, before, after);
+  const b = recipientsAdded(decl, after, before);
+  return [...new Set([...a, ...b])].sort();
+}
 
 /** Recipients present in the edited arguments and not in the program's (lower-cased addresses). */
 function recipientsAdded(decl: ToolDeclarationRecord, before: Record<string, unknown>, after: Record<string, unknown>): string[] {

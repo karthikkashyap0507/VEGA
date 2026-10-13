@@ -369,6 +369,28 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
+  packages/autonomy:
+    dependencies:
+      '@vega/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@vega/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
   packages/compensators:
     dependencies:
       '@vega/connector-sdk':
@@ -666,6 +688,25 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
+  packages/contention:
+    dependencies:
+      '@vega/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
       vitest:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
@@ -994,6 +1035,9 @@ importers:
       '@vega/authz':
         specifier: workspace:*
         version: link:../../packages/authz
+      '@vega/autonomy':
+        specifier: workspace:*
+        version: link:../../packages/autonomy
       '@vega/compensators':
         specifier: workspace:*
         version: link:../../packages/compensators
@@ -1006,6 +1050,12 @@ importers:
       '@vega/connector-web':
         specifier: workspace:*
         version: link:../../packages/connectors/web
+      '@vega/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors/registry
+      '@vega/contention':
+        specifier: workspace:*
+        version: link:../../packages/contention
       '@vega/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -1033,6 +1083,9 @@ importers:
       '@vega/planner':
         specifier: workspace:*
         version: link:../../packages/planner
+      '@vega/policy-engine':
+        specifier: workspace:*
+        version: link:../../packages/policy-engine
       '@vega/risk':
         specifier: workspace:*
         version: link:../../packages/risk
@@ -1079,18 +1132,12 @@ importers:
       '@vega/connector-testing':
         specifier: workspace:*
         version: link:../../packages/connectors/testing
-      '@vega/connectors':
-        specifier: workspace:*
-        version: link:../../packages/connectors/registry
       '@vega/interpreter':
         specifier: workspace:*
         version: link:../../packages/interpreter
       '@vega/orchestration':
         specifier: workspace:*
         version: link:../../packages/orchestration
-      '@vega/policy-engine':
-        specifier: workspace:*
-        version: link:../../packages/policy-engine
       '@vega/service-execution':
         specifier: workspace:*
         version: link:../execution
@@ -1182,6 +1229,9 @@ importers:
       '@vega/approvals':
         specifier: workspace:*
         version: link:../../packages/approvals
+      '@vega/autonomy':
+        specifier: workspace:*
+        version: link:../../packages/autonomy
       '@vega/compensators':
         specifier: workspace:*
         version: link:../../packages/compensators
@@ -1197,6 +1247,9 @@ importers:
       '@vega/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors/registry
+      '@vega/contention':
+        specifier: workspace:*
+        version: link:../../packages/contention
       '@vega/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

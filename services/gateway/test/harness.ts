@@ -5,7 +5,7 @@ import { createLogger } from '@vega/shared';
 import { migrate } from '@vega/db';
 import { FgaClient, fgaAdmin, modelToJson } from '@vega/authz';
 import { InMemoryIdentityAdmin, PrincipalAssertionIssuer, PrincipalAssertionVerifier } from '@vega/idp';
-import { buildControlApp, injectFetch, provisionTenant, activateOnFirstSignIn } from '@vega/service-control';
+import { buildControlApp, injectFetch, provisionTenant, activateOnFirstSignIn, type ControlDeps } from '@vega/service-control';
 import type { Plan } from '@vega/contracts';
 import { buildGateway, sessionCookieName } from '../src/app.js';
 import { controlClientFactory } from '../src/control-client.js';
@@ -35,6 +35,8 @@ export interface HarnessOptions {
   rotateAfterSeconds?: number;
   tokenLimit?: number;
   signupAllowPassword?: boolean;
+  /** Extra control-plane dependencies (a module's service) for the routes under test. */
+  controlDeps?: Partial<ControlDeps>;
 }
 
 export function cookieFrom(res: LightMyRequestResponse, name: string): string | undefined {
@@ -63,7 +65,7 @@ export async function createGatewayHarness(options: HarnessOptions = {}): Promis
 
   const issuer = await PrincipalAssertionIssuer.ephemeral('gateway', 'control');
   const control = await buildControlApp({
-    deps: { identity, fga, logger, returnInviteCodes: true },
+    deps: { identity, fga, logger, returnInviteCodes: true, ...(options.controlDeps ?? {}) },
     verifier: new PrincipalAssertionVerifier(issuer.jwks, 'gateway', 'control'),
   });
 

@@ -310,6 +310,7 @@ export const KIND_LABEL: Record<string, string> = {
   admin: 'Admin',
   'taint.violation': 'Taint violation',
   'autonomy.changed': 'Autonomy changed',
+  'certification.completed': 'Certification report',
 };
 
 export const shortDigest = (d: string | null | undefined) =>

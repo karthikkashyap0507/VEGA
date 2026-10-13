@@ -201,7 +201,7 @@ export default function ActionCenterPage() {
           <CardHeader>
             <div className="grid gap-0.5">
               <CardTitle>Autonomy</CardTitle>
-              <CardDescription>What each agent has earned. Promotion arrives with Module 10; the rates are real today.</CardDescription>
+              <CardDescription>What each agent has earned, action by action. <Link className="text-primary hover:underline" href="/autonomy">Open the autonomy dashboard</Link> to certify, ratify or demote.</CardDescription>
             </div>
           </CardHeader>
           <CardContent className="overflow-x-auto p-0">
@@ -211,6 +211,7 @@ export default function ActionCenterPage() {
                   <Th>Agent</Th>
                   <Th>Tier</Th>
                   <Th className="text-right">Runs</Th>
+                  <Th>Promotion</Th>
                   <Th className="text-right">Autonomous</Th>
                   <Th className="text-right">Errors</Th>
                   <Th className="text-right">Time-to-Undo</Th>
@@ -222,6 +223,7 @@ export default function ActionCenterPage() {
                     <Td>{a.name}</Td>
                     <Td className="text-xs">{a.tier}</Td>
                     <Td className="text-right tabular-nums">{a.runs}</Td>
+                    <Td className="text-xs">{a.promotion.eligible ? <Badge tone="success">ready to ratify</Badge> : <span className="text-muted">{a.promotion.eligible === null ? 'not on the ladder' : 'not yet'}</span>}</Td>
                     <Td className="text-right tabular-nums">{pct(a.autonomyRate)}</Td>
                     <Td className="text-right tabular-nums">{pct(a.errorRate)}</Td>
                     <Td className="text-right tabular-nums">{msText(a.meanTimeToUndoMs)}</Td>

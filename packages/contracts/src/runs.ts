@@ -62,7 +62,7 @@ export const AgentSpec = z.object({
     .default({ maxSteps: 50, maxCostCents: 200, maxFanout: 20 }),
   /** Optional fixed plan in the DSL (scheduled agents, or no planner model configured). */
   program: z.string().max(200_000).optional(),
-  /** Read-only until Module 10: displayed, never settable. */
+  /** The starting tier only. Tiers live per workflow × action (autonomy_state) and move through the ladder, never a spec. */
   autonomy: z.literal('SHADOW').default('SHADOW'),
 });
 export type AgentSpec = z.infer<typeof AgentSpec>;

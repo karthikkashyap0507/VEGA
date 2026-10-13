@@ -1039,6 +1039,148 @@ export const retrievals = pgTable('retrievals', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ------------------------------------------------------------------ Module 10 (0013_autonomy)
+
+export const autonomyState = pgTable('autonomy_state', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  workflowKey: text('workflow_key').notNull(),
+  actionType: text('action_type').notNull(),
+  tier: text('tier').notNull(),
+  sampleRate: integer('sample_rate'),
+  since: timestamp('since', { withTimezone: true }).notNull().defaultNow(),
+  certificationId: uuid('certification_id'),
+  ratifiedBy: uuid('ratified_by'),
+  nextReviewAt: timestamp('next_review_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const certifications = pgTable('certifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  workflowKey: text('workflow_key').notNull(),
+  actionType: text('action_type').notNull(),
+  windowFrom: timestamp('window_from', { withTimezone: true }).notNull(),
+  windowTo: timestamp('window_to', { withTimezone: true }).notNull(),
+  sampleSize: integer('sample_size').notNull(),
+  agreementRate: numeric('agreement_rate', { mode: 'number' }).notNull(),
+  editRate: numeric('edit_rate', { mode: 'number' }).notNull(),
+  criticalErrors: integer('critical_errors').notNull(),
+  errorTaxonomy: jsonb('error_taxonomy').notNull(),
+  connectorVersions: jsonb('connector_versions').notNull(),
+  modelVersions: jsonb('model_versions').notNull(),
+  fromTier: text('from_tier').notNull(),
+  recommendation: text('recommendation').notNull(),
+  recommendedTier: text('recommended_tier'),
+  gateJson: jsonb('gate_json').notNull().default({}),
+  reportRef: text('report_ref').notNull(),
+  signature: text('signature').notNull(),
+  decidedBy: uuid('decided_by'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const autonomyTransitions = pgTable('autonomy_transitions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  workflowKey: text('workflow_key').notNull(),
+  actionType: text('action_type').notNull(),
+  fromTier: text('from_tier').notNull(),
+  toTier: text('to_tier').notNull(),
+  direction: text('direction').notNull(),
+  trigger: text('trigger').notNull(),
+  evidenceJson: jsonb('evidence_json').notNull(),
+  actorId: uuid('actor_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const policyProposals = pgTable('policy_proposals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  kind: text('kind').notNull(),
+  subjectJson: jsonb('subject_json').notNull(),
+  evidenceJson: jsonb('evidence_json').notNull(),
+  proposedChange: jsonb('proposed_change').notNull(),
+  confidence: numeric('confidence', { mode: 'number' }).notNull(),
+  state: text('state').notNull().default('open'),
+  decidedBy: uuid('decided_by'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const noveltyBaselines = pgTable('novelty_baselines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  workflowKey: text('workflow_key').notNull(),
+  actionType: text('action_type').notNull(),
+  featureStats: jsonb('feature_stats').notNull(),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const entityLocks = pgTable('entity_locks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  entityKey: text('entity_key').notNull(),
+  mode: text('mode').notNull(),
+  holderRunId: uuid('holder_run_id').notNull(),
+  holderAgentId: uuid('holder_agent_id').notNull(),
+  intent: text('intent').notNull(),
+  riskTier: text('risk_tier'),
+  acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }).notNull(),
+});
+
+/** Who is blocked on what (§10.1): the observable half of the two-run wait-cycle detector. */
+export const entityLockWaits = pgTable(
+  'entity_lock_waits',
+  {
+    tenantId: uuid('tenant_id').notNull(),
+    entityKey: text('entity_key').notNull(),
+    mode: text('mode').notNull(),
+    waitingRunId: uuid('waiting_run_id').notNull(),
+    waitingAgentId: uuid('waiting_agent_id').notNull(),
+    riskTier: text('risk_tier'),
+    waitingSince: timestamp('waiting_since', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.entityKey, t.mode, t.waitingRunId] })],
+);
+
+export const contactLedger = pgTable('contact_ledger', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  externalIdentity: text('external_identity').notNull(),
+  channel: text('channel').notNull(),
+  contactedAt: timestamp('contacted_at', { withTimezone: true }).notNull(),
+  byRunId: uuid('by_run_id').notNull(),
+  byAgentId: uuid('by_agent_id').notNull(),
+  onBehalfOf: uuid('on_behalf_of').notNull(),
+  relationshipType: text('relationship_type'),
+  cooldownUntil: timestamp('cooldown_until', { withTimezone: true }).notNull(),
+  overrideReason: text('override_reason'),
+  overriddenBy: uuid('overridden_by'),
+});
+
+export const writeConflicts = pgTable('write_conflicts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  entityKey: text('entity_key').notNull(),
+  field: text('field').notNull(),
+  proposals: jsonb('proposals').notNull(),
+  resolution: text('resolution'),
+  resolvedBy: uuid('resolved_by'),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const budgets = pgTable('budgets', {
+  tenantId: uuid('tenant_id').primaryKey(),
+  limitCents: integer('limit_cents').notNull().default(0),
+  breachBehavior: text('breach_behavior').notNull().default('queue'),
+  updatedBy: uuid('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   'tenants',
   'users',
@@ -1098,6 +1240,16 @@ export const TENANT_SCOPED_TABLES = [
   'kb_documents',
   'kb_chunks',
   'retrievals',
+  'autonomy_state',
+  'certifications',
+  'autonomy_transitions',
+  'policy_proposals',
+  'novelty_baselines',
+  'entity_locks',
+  'entity_lock_waits',
+  'contact_ledger',
+  'write_conflicts',
+  'budgets',
 ] as const;
 
 /** Not tenant-scoped, and each needs a reason recorded here — see coverage.test.ts. */

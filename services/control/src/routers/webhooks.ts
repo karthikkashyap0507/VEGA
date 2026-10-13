@@ -48,6 +48,14 @@ export const WEBHOOK_EVENT_KINDS = [
   'approval.expired',
   'approval.escalated',
   'approval.quality_flag',
+  // Module 10 (docs/module10.md §16)
+  'autonomy.promoted',
+  'autonomy.demoted',
+  'certification.completed',
+  'proposal.created',
+  'contention.blocked',
+  'budget.exceeded',
+  'usage.anomaly',
 ] as const;
 
 const endpointView = (e: typeof schema.webhookEndpoints.$inferSelect) => ({

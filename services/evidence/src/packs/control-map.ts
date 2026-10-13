@@ -31,6 +31,7 @@ const BY_KIND: Record<string, { what: string; controls: Control[] }> = {
   'compensation.failed': { what: 'An undo that failed (an incident)', controls: [AI_ACT_73, AI_ACT_15] },
   'policy.activated': { what: 'A policy bundle going live, with every policy document in it', controls: [NIST, FINRA_3110] },
   'autonomy.changed': { what: 'An agent’s autonomy tier changing', controls: [AI_ACT_14, NIST] },
+  'certification.completed': { what: 'A signed certification report: the evidence a workflow was promoted on (or held back by)', controls: [AI_ACT_14, AI_ACT_15, NIST] },
   admin: { what: 'An administrative change', controls: [AI_ACT_12] },
   'taint.violation': { what: 'Untrusted content blocked from reaching a tool', controls: [AI_ACT_15, AI_ACT_73] },
   'run.program': { what: 'The plan a run executed (program digest, pinned model)', controls: [AI_ACT_12] },

@@ -25,6 +25,7 @@ import { InMemoryIdentityAdmin, loadKeyFile, PrincipalAssertionVerifier, Zitadel
 import { initTelemetry } from '@vega/telemetry';
 import { buildControlApp } from './app.js';
 import { EvidenceClient } from './evidence/client.js';
+import { AutonomyService } from './autonomy/service.js';
 import { ApprovalService } from './approvals/service.js';
 import { ApprovalDispatcher, logMailer, ntfyApprovalNotifier } from './approvals/dispatcher.js';
 
@@ -80,7 +81,7 @@ if (!tls) {
 
 // ---------------------------------------------------------------- connectors (Module 2)
 const executionToken = env['EXECUTION_INTERNAL_TOKEN'];
-const stateSecret = env['CONNECTOR_STATE_SECRET'] ?? env['SESSION_SECRET'];
+const stateSecret = env['CONNECTOR_STATE_SECRET'] || env['SESSION_SECRET'];
 const sandboxUrl = env['CONNECTOR_SANDBOX_URL'];
 if (sandboxUrl && production) throw new Error('CONNECTOR_SANDBOX_URL is refused in production');
 if (sandboxUrl) logger.warn({ sandboxUrl }, 'DEV: OAuth token exchange goes to a SANDBOX provider');
@@ -236,8 +237,11 @@ const dispatcher = new ApprovalDispatcher({
 if (!env['NTFY_URL']) logger.warn('NTFY_URL unset: approvals are batched and counted against the budget, but no push is sent');
 dispatcher.start(Number(env['APPROVAL_DISPATCH_INTERVAL_MS'] ?? 30_000));
 
+// Module 10: the autonomy ladder, contention operations, usage and budgets. Enforcement is the executor's.
+const autonomy = new AutonomyService({ evidence, log: logger });
+
 const app = await buildControlApp({
-  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility, ...(evidence ? { evidence } : {}), approvals, knowledge },
+  deps: { identity, fga, logger, returnInviteCodes: !production, ...(connectors ? { connectors } : {}), ...(agent ? { agent } : {}), ...(policy ? { policy } : {}), reversibility, ...(evidence ? { evidence } : {}), approvals, knowledge, autonomy },
   verifier,
   ...(tls ? { https: internalServerTls(tls) } : {}),
 });

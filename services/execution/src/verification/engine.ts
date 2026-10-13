@@ -36,6 +36,8 @@ export interface VerificationDeps {
   /** The knowledge base, for evidence beyond what the run read. */
   kb?: KnowledgeLookup | undefined;
   extractor?: ClaimExtractor | undefined;
+  /** Module 10B: the global contact ledger, consulted EARLY so nobody approves a send that cannot happen. */
+  contacts?: { cooldown(tenantId: string, recipients: string[], exceptRunId: string): Promise<string | null> } | undefined;
   log: { warn(o: object, m: string): void; error(o: object, m: string): void };
   now?: () => Date;
 }
@@ -162,6 +164,10 @@ export class VerificationEngine {
       // Within one run it is a loop: stop. From another run a person may mean it (a re-send): ask.
       if (dup.runId === ctx.runId) return row('ABORT', `${what} by this run`, { duplicateOf: dup.runId });
       return row(approved ? 'WARN' : 'ESCALATE', `${what} (run ${dup.runId})`, { duplicateOf: dup.runId });
+    }
+    if (this.deps.contacts && effect?.externalRecipients.length) {
+      const blocked = await this.deps.contacts.cooldown(ctx.tenantId, effect.externalRecipients, ctx.runId);
+      if (blocked) return row('ABORT', blocked, { cooldown: true });
     }
     for (const r of effect?.recordsAffected ?? []) {
       if (r.field === undefined) continue;
