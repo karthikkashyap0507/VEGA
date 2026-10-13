@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, lte } from 'drizzle-orm';
 import { Cron } from 'croner';
+import { ZodError } from 'zod';
 import { schedRunQueue, schedScheduleAgents, schedWebhookTenants, schema, withTenant } from '@vega/db';
 import { AgentSpec, TERMINAL_RUN_STATUSES, type Objective, type RunView } from '@vega/contracts';
 import type { ToolRegistry } from '@vega/connector-sdk';
@@ -207,7 +208,13 @@ export class RunCoordinator {
   }
 
   async process(tenantId: string, runId: string): Promise<void> {
-    const run = await this.core.store.load(tenantId, runId);
+    let run: LoadedRun | null;
+    try {
+      run = await this.core.store.load(tenantId, runId);
+    } catch (e) {
+      if (e instanceof ZodError) return this.failUnreadable(tenantId, runId, e);
+      throw e;
+    }
     if (!run || TERMINAL_RUN_STATUSES.has(run.status)) return;
     switch (run.status) {
       case 'CREATED': {
@@ -237,6 +244,22 @@ export class RunCoordinator {
       default:
         return;
     }
+  }
+
+  /**
+   * A run whose stored objective or spec no longer parses can never make progress, and retrying
+   * it on every sweep only repeats the error forever. It fails once, with the reason, where the
+   * people who own it can see it.
+   */
+  private async failUnreadable(tenantId: string, runId: string, e: ZodError): Promise<void> {
+    const issues = e.issues.slice(0, 5).map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
+    try {
+      await this.core.store.setStatus(tenantId, runId, 'FAILED', { reason: `the run's stored record could not be read (${issues.join('; ')})`, error: { code: 'RUN_RECORD_INVALID', issues } });
+    } catch (err) {
+      if (err instanceof TransitionError) return; // already terminal, or another replica settled it first
+      throw err;
+    }
+    this.core.log.warn({ run_id: runId, issues }, 'run record does not parse: failed it rather than retrying it on every sweep');
   }
 
   /** C2 for the next program version (first plan, clarified plan, or replan). */

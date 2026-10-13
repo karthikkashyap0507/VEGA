@@ -69,7 +69,7 @@ function buildServer(auth: string | null): McpServer {
 /** Stateless Streamable HTTP: one server + transport per request, as the SDK recommends. */
 const serverFetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const req = new Request(input, init);
-  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
   await buildServer(req.headers.get('authorization')).connect(transport);
   return transport.handleRequest(req);
 }) as typeof fetch;

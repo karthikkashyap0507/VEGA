@@ -92,7 +92,7 @@ describe('programs across the planes', () => {
   it('a laundering program is rejected before anything runs', async () => {
     const r = await h.as(A.tenantId, A.userId).programs.dryRun.mutate({ program: `${READ}\nlet c = extract msg into ContactDetails\ncall gmail.send({ to: [c.email], subject: "x", body: "y" })` });
     expect(r.status).toBe('invalid');
-    expect((r as { validationErrors: Array<{ code: string }> }).validationErrors[0]?.code).toBe('TAINT_RECIPIENT');
+    expect((r as unknown as { validationErrors: Array<{ code: string }> }).validationErrors[0]?.code).toBe('TAINT_RECIPIENT');
   });
 
   let runId: string;

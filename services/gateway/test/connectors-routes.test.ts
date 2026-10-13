@@ -22,7 +22,7 @@ afterAll(async () => {
 describe('execute is not public', () => {
   it.each(['POST', 'GET', 'PUT', 'PATCH'] as const)('%s /v1/tools/:toolId/execute → 404, even authenticated', async (method) => {
     for (const cookies of [{}, { [COOKIE]: cookie }]) {
-      const res = await h.gateway.inject({ method, url: '/v1/tools/gmail.send/execute', cookies, payload: method === 'GET' ? undefined : { connectorId: 'x', args: {} } });
+      const res = await h.gateway.inject({ method, url: '/v1/tools/gmail.send/execute', cookies, ...(method === 'GET' ? {} : { payload: { connectorId: 'x', args: {} } }) });
       expect(res.statusCode).toBe(404);
     }
   });

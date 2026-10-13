@@ -258,7 +258,7 @@ function authenticator() {
   return {
     register(challenge: string) {
       const authData = Buffer.concat([rpIdHash, flags(true, true), count(), Buffer.alloc(16), Buffer.from([0, credId.length]), credId, Buffer.from(cose)]);
-      const att = isoCBOR.encode(new Map<string, unknown>([['fmt', 'none'], ['attStmt', new Map()], ['authData', authData]]));
+      const att = isoCBOR.encode(new Map<string, unknown>([['fmt', 'none'], ['attStmt', new Map()], ['authData', authData]]) as Parameters<typeof isoCBOR.encode>[0]);
       const id = isoBase64URL.fromBuffer(credId);
       return { id, rawId: id, type: 'public-key', clientExtensionResults: {}, response: { clientDataJSON: isoBase64URL.fromBuffer(clientData('webauthn.create', challenge)), attestationObject: isoBase64URL.fromBuffer(att), transports: ['internal'] } };
     },

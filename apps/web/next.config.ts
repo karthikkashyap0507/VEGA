@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { parseEnv } from 'node:util';
 import type { NextConfig } from 'next';
 
 /**
@@ -5,6 +8,16 @@ import type { NextConfig } from 'next';
  * handler in src/app/v1/[...path] (runtime GATEWAY_URL), so the session cookie (httpOnly,
  * SameSite=Lax) is sent without CORS and the browser never holds a token script can read.
  */
+
+// One .env for the repository: the services read the root .env, and the web app takes from it
+// only what is its own — NEXT_PUBLIC_* and GATEWAY_URL — never the service secrets beside them.
+// A variable already set in the environment wins (CI, containers).
+const rootEnv = resolve(process.cwd(), '../../.env');
+if (existsSync(rootEnv)) {
+  for (const [key, value] of Object.entries(parseEnv(readFileSync(rootEnv, 'utf8')))) {
+    if ((key.startsWith('NEXT_PUBLIC_') || key === 'GATEWAY_URL') && process.env[key] === undefined) process.env[key] = value;
+  }
+}
 
 const config: NextConfig = {
   reactStrictMode: true,

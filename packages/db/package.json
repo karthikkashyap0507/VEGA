@@ -9,8 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint .",
-    "migrate": "tsx src/migrate.ts",
-    "seed": "tsx -e \"import('./src/seed.js').then(m=>m.seed()).then(r=>console.log(r))\"",
+    "migrate": "tsx --env-file-if-exists=../../.env src/migrate.ts",
+    "seed": "tsx --env-file-if-exists=../../.env -e \"import('./src/seed.js').then(m=>m.seed()).then(r=>console.log(r))\"",
     "test:isolation": "vitest run test/isolation.test.ts test/coverage.test.ts test/resolver.test.ts"
   },
   "dependencies": {

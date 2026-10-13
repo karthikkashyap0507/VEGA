@@ -47,7 +47,7 @@ function mcpServer(): McpServer {
 const fetchAll = (async (input: string | URL | Request, init?: RequestInit) => {
   const req = new Request(input, init);
   if (new URL(req.url).host === 'tools.partner.example') {
-    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
     await mcpServer().connect(transport);
     return transport.handleRequest(req);
   }

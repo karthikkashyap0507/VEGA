@@ -57,7 +57,8 @@ describe('envelope encryption', () => {
 
   it('detects tampering with the wrapped DEK', () => {
     const sealed = sealSecret('secret-value-here', KEK);
-    sealed.wrappedDek[sealed.wrappedDek.length - 1] ^= 0xff;
+    const last = sealed.wrappedDek.length - 1;
+    sealed.wrappedDek[last] = sealed.wrappedDek[last]! ^ 0xff;
     expect(() => openSecret(sealed, KEK)).toThrow(CryptoError);
   });
 

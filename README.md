@@ -37,20 +37,28 @@ infrastructure rather than code (deployment modes, SCIM, the deferred marketplac
 ## Quick start
 
 ```bash
-cp .env.example .env
-
-# generate the two local secrets and paste them into .env
-openssl rand -base64 48   # SESSION_SECRET
-openssl rand -base64 32   # LOCAL_KEK_BASE64
-
 pnpm install
-pnpm stack:up             # Postgres ×2, Valkey, Zitadel, OpenFGA, Jaeger
-pnpm db:migrate
+pnpm dev:setup            # .env (secrets generated), Docker stack, identity, migrations, policy
 pnpm dev
 ```
 
-**No external accounts are required for Module 1** — the whole stack is self-hosted. The first
-paid key you need is Anthropic, at Module 3.
+Then open http://localhost:3000 and choose **Create a workspace**: in local development the
+owner's password is set directly (`SIGNUP_ALLOW_PASSWORD`; production sends an invitation).
+
+`pnpm dev:setup` is idempotent — re-run it to repair a half-set-up machine. Its steps, each
+runnable on its own:
+
+| Step | Command | What it does |
+|---|---|---|
+| 1 | `pnpm env:init` | `.env` from `.env.example`, every local secret generated (no openssl needed); never overwrites a value you set |
+| 2 | `pnpm stack:up` | Postgres ×2 (primary with pgvector), Valkey, Zitadel, OpenFGA, SeaweedFS, OPA, Presidio, Jaeger |
+| 3 | `pnpm idp:bootstrap` | Zitadel project, OIDC app and provisioner keys → `infra/docker/secrets/` |
+| 4 | `pnpm db:migrate` | the numbered SQL migrations |
+| 5 | `pnpm policy:setup` | bundle signing key, OPA configuration, the signed baseline bundles |
+
+**No external accounts are required to run it** — the whole stack is self-hosted. Without an
+`ANTHROPIC_API_KEY` (or LiteLLM) planning uses a deterministic development planner, and without
+vLLM the knowledge base uses a lexical stand-in; both say so in the logs.
 
 | Service | URL | Credentials |
 |---|---|---|
@@ -60,8 +68,12 @@ paid key you need is Anthropic, at Module 3.
 | OpenFGA playground | http://localhost:8082 | — |
 | Jaeger traces | http://localhost:16686 | — |
 
-Requires Node 22+, pnpm 10+, Docker. On Windows, **develop inside WSL2** — path handling and file
-watching differ enough to produce bugs that only appear in CI (docs/TECHSTACK.md §20).
+Requires Node 22+, pnpm 10+, Docker (Docker Desktop on Windows and macOS). Native Windows with
+Docker Desktop works; WSL2 remains the closest match to CI (docs/TECHSTACK.md §20).
+
+**On a machine with 8 GB of RAM** the Docker stack takes about 3.5 GB. Stop `pnpm dev` before a full
+`pnpm test`, and run it with fewer workers (`pnpm test --maxWorkers=3`): starved of memory, Docker
+Desktop's port proxy drops database connections and the failures look like flaky tests.
 
 ### Task runner
 

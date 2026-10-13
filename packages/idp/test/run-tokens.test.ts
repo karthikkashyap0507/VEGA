@@ -1,3 +1,4 @@
+import type { webcrypto } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -80,7 +81,7 @@ describe('run tokens', () => {
 
   it('rejects a long-lived token even if correctly signed (defence in depth)', async () => {
     // Simulates a misconfigured issuer: sign directly with the same key, bypassing mint().
-    const key = (issuer as unknown as { options: { privateKey: CryptoKey; keyId: string } }).options;
+    const key = (issuer as unknown as { options: { privateKey: webcrypto.CryptoKey; keyId: string } }).options;
     const now = Math.floor(Date.now() / 1000);
     const token = await new SignJWT({ obo: 'u', tid: 't', run: 'r', mid: 'm', scope: '' })
       .setProtectedHeader({ alg: 'ES256', kid: key.keyId, typ: 'run+jwt' })
@@ -95,7 +96,7 @@ describe('run tokens', () => {
   });
 
   it('rejects a user access token presented as a run token (typ binding)', async () => {
-    const key = (issuer as unknown as { options: { privateKey: CryptoKey; keyId: string } }).options;
+    const key = (issuer as unknown as { options: { privateKey: webcrypto.CryptoKey; keyId: string } }).options;
     const now = Math.floor(Date.now() / 1000);
     const token = await new SignJWT({ obo: 'u', tid: 't', run: 'r', mid: 'm', scope: '' })
       .setProtectedHeader({ alg: 'ES256', kid: key.keyId })

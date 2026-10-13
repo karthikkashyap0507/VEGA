@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, type webcrypto } from 'node:crypto';
 import { exportJWK, generateKeyPair, SignJWT, type JSONWebKeySet } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -21,9 +21,9 @@ const KEY_ID = 'key-abc';
 const REDIRECT = 'http://localhost:3001/v1/oauth/callback';
 
 let clientKey: LoadedKey;
-let idpPrivate: CryptoKey;
+let idpPrivate: webcrypto.CryptoKey;
 let idpJwks: JSONWebKeySet;
-let clientPublicJwk: JsonWebKey;
+let clientPublicJwk: webcrypto.JsonWebKey;
 
 const DISCOVERY = {
   issuer: ISSUER,
@@ -78,7 +78,7 @@ interface FakeIdp {
 function fakeIdp(options: { tokenResponse?: () => Promise<unknown>; tokenStatus?: number } = {}): FakeIdp {
   const state: FakeIdp = { fetchImpl: undefined as never, lastTokenForm: undefined };
 
-  state.fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  state.fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
 
     if (url.endsWith('/.well-known/openid-configuration')) {

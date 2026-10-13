@@ -53,7 +53,8 @@ export class VllmReranker implements Reranker {
 }
 
 export function rerankerFromEnv(env: NodeJS.ProcessEnv): Reranker {
-  const url = env['VLLM_RERANKER_URL'] ?? env['VLLM_EMBEDDINGS_URL'];
+  // `||`, not `??`: .env.example ships `VLLM_RERANKER_URL=` blank, and blank means "the embeddings server".
+  const url = env['VLLM_RERANKER_URL'] || env['VLLM_EMBEDDINGS_URL'];
   if (url && env['EMBEDDINGS_DEV'] !== 'true') return new VllmReranker({ url, model: env['RERANKER_MODEL'] ?? 'BAAI/bge-reranker-v2-m3', apiKey: env['VLLM_API_KEY'] });
   return new LexicalReranker();
 }

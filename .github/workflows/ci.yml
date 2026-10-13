@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16 # Module 9 needs the vector extension (0012_knowledge.sql)
         env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
         ports: ['5432:5432']
         options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
@@ -102,7 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16 # Module 9 needs the vector extension (0012_knowledge.sql)
         env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
         ports: ['5432:5432']
         options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
@@ -268,7 +268,7 @@ jobs:
     needs: [quality]
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16 # Module 9 needs the vector extension (0012_knowledge.sql)
         env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
         ports: ['5432:5432']
         options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
@@ -300,7 +300,7 @@ jobs:
     needs: [quality]
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16 # Module 9 needs the vector extension (0012_knowledge.sql)
         env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
         ports: ['5432:5432']
         options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10
@@ -345,7 +345,7 @@ jobs:
     needs: [quality]
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16 # Module 9 needs the vector extension (0012_knowledge.sql)
         env: { POSTGRES_DB: vega, POSTGRES_USER: vega, POSTGRES_PASSWORD: vega_local_dev_only }
         ports: ['5432:5432']
         options: --health-cmd "pg_isready -U vega" --health-interval 5s --health-timeout 5s --health-retries 10

@@ -9,7 +9,7 @@ import plugin from '../src/index.js';
  * that silently stops matching (or starts over-matching) fails here.
  */
 
-RuleTester.afterAll = afterAll;
+(RuleTester as unknown as { afterAll: typeof afterAll }).afterAll = afterAll;
 RuleTester.describe = describe;
 RuleTester.it = it;
 RuleTester.itOnly = it.only;

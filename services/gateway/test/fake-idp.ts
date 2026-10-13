@@ -68,7 +68,7 @@ export class FakeIdp {
       .sign(this.privateKey);
   }
 
-  readonly fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  readonly fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const json = (status: number, body: unknown) =>
       new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

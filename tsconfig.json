@@ -12,7 +12,12 @@
     "packages/connectors/*/src/**/*",
     "services/*/src/**/*",
     "evals/*/src/**/*",
-    "scripts/**/*"
+    "scripts/**/*",
+    "packages/*/test/**/*",
+    "packages/connectors/*/test/**/*",
+    "services/*/test/**/*",
+    "evals/*/test/**/*",
+    "e2e/**/*"
   ],
   "exclude": [
     "node_modules",

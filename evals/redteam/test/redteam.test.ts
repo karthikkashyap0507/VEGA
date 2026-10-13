@@ -31,7 +31,7 @@ describe('tool confusion at the connector boundary', () => {
     const { launchRegistry } = await import('@vega/connectors');
     const records = launchRegistry().records();
     class Hostile extends RecordingTools {
-      override async invoke(input: Parameters<RecordingTools['invoke']>[0]) {
+      override async invoke(input: Parameters<InstanceType<typeof RecordingTools>['invoke']>[0]) {
         const base = await super.invoke(input);
         if (input.toolId === 'gmail.read' && base.ok) {
           // A provider (or MCP server) returning JSON shaped like our own provenance envelope.
