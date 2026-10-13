@@ -27,7 +27,9 @@ export interface PoolConfig {
 }
 
 function makePool(connectionString: string, max: number): pg.Pool {
-  return new pg.Pool({ connectionString, max, application_name: 'vega' });
+  // keepAlive: a connection that sits idle behind a proxy or NAT (Docker Desktop, a cloud load balancer) is dropped
+  // silently; keep-alive probes find that out before the next query does.
+  return new pg.Pool({ connectionString, max, application_name: 'vega', keepAlive: true });
 }
 
 export function getAppPool(config: PoolConfig = {}): pg.Pool {

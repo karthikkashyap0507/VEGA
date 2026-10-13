@@ -33,6 +33,9 @@ const OPA_IMAGE = process.env['OPA_IMAGE'] ?? 'mirror.gcr.io/openpolicyagent/opa
 const BUCKET = 'vega-policy-test';
 const OPA_PORT = 18000 + Math.floor(Math.random() * 1000);
 const OPA_NAME = `vega-opa-policies-test-${OPA_PORT}`;
+// How the OPA container reaches object storage. Not `--network host`: on Docker Desktop (Windows, macOS) the host network is
+// the VM's, so neither side could reach the other. A published port plus host.docker.internal works on every platform.
+const S3_FROM_CONTAINER = S3.endpoint.replace(/\/\/(127\.0\.0\.1|localhost)/, '//host.docker.internal');
 
 const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256', privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
 const key = signingKeyFromPem(privateKey, 'vega');
@@ -71,10 +74,10 @@ beforeAll(async () => {
   // OPA exactly as deployed: discovery from object storage, every bundle signature-verified.
   const dir = mkdtempSync(join(tmpdir(), 'opa-cfg-'));
   chmodSync(dir, 0o755);
-  writeFileSync(join(dir, 'opa.yaml'), opaConfig({ storeUrl: `${S3.endpoint}/${BUCKET}`, publicKeyPem: publicPem(key), s3Signing: true }).replace('min_delay_seconds: 2', 'min_delay_seconds: 1').replace('max_delay_seconds: 5', 'max_delay_seconds: 2'), { mode: 0o644 });
+  writeFileSync(join(dir, 'opa.yaml'), opaConfig({ storeUrl: `${S3_FROM_CONTAINER}/${BUCKET}`, publicKeyPem: publicPem(key), s3Signing: true }).replace('min_delay_seconds: 2', 'min_delay_seconds: 1').replace('max_delay_seconds: 5', 'max_delay_seconds: 2'), { mode: 0o644 });
   execFileSync(
     'docker',
-    ['run', '-d', '--rm', '--name', OPA_NAME, '--network', 'host', '-v', `${dir}:/cfg:ro`, '-e', `AWS_ACCESS_KEY_ID=${S3.accessKeyId}`, '-e', `AWS_SECRET_ACCESS_KEY=${S3.secretAccessKey}`, '-e', 'AWS_REGION=us-east-1', OPA_IMAGE, 'run', '--server', '--addr', `127.0.0.1:${OPA_PORT}`, '--config-file', '/cfg/opa.yaml'],
+    ['run', '-d', '--rm', '--name', OPA_NAME, '--add-host', 'host.docker.internal:host-gateway', '-p', `127.0.0.1:${OPA_PORT}:8181`, '-v', `${dir}:/cfg:ro`, '-e', `AWS_ACCESS_KEY_ID=${S3.accessKeyId}`, '-e', `AWS_SECRET_ACCESS_KEY=${S3.secretAccessKey}`, '-e', 'AWS_REGION=us-east-1', OPA_IMAGE, 'run', '--server', '--addr', '0.0.0.0:8181', '--config-file', '/cfg/opa.yaml'],
     { stdio: 'pipe' },
   );
 
